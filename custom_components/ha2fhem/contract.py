@@ -9,9 +9,25 @@ cross-checked byte-for-byte without spinning up Home Assistant.
 
 from __future__ import annotations
 
+import json
 import re
 
 VACUUM_STATES = {"cleaning", "docked", "idle", "paused", "returning", "error"}
+
+# Command topic kinds, i.e. the last segment of a command topic
+# (`<prefix>/devices/<device_id>/<entity_key>/<kind>`).
+COMMAND_KINDS = {"set", "set_fan_speed", "send_command"}
+
+# Plain payloads on the `set` command topic that map 1:1 to a same-named
+# `vacuum.<payload>` service call (CONTRACT.md "Component: vacuum" > Commands).
+VACUUM_SIMPLE_COMMANDS = {
+    "start",
+    "stop",
+    "pause",
+    "return_to_base",
+    "locate",
+    "clean_spot",
+}
 
 
 def _slugify(value: str) -> str:
@@ -48,6 +64,36 @@ def state_topic(prefix: str, device_id: str, entity_key: str) -> str:
 def availability_topic(prefix: str, device_id: str) -> str:
     """Per-device availability topic: ``<prefix>/devices/<device_id>/availability``."""
     return f"{prefix}/devices/{device_id}/availability"
+
+
+def command_topic(prefix: str, device_id: str, entity_key: str, kind: str = "set") -> str:
+    """Command topic: ``<prefix>/devices/<device_id>/<entity_key>/<kind>``.
+
+    ``kind`` is one of :data:`COMMAND_KINDS` (``set``, ``set_fan_speed``,
+    ``send_command``).
+    """
+    return f"{prefix}/devices/{device_id}/{entity_key}/{kind}"
+
+
+def parse_command_topic(prefix: str, topic: str) -> tuple[str, str, str] | None:
+    """Parse an incoming command topic into ``(device_id, entity_key, kind)``.
+
+    Returns None if ``topic`` is not a command topic under ``prefix`` (wrong
+    prefix, wrong shape, or an unknown trailing segment).
+    """
+    base = f"{prefix}/devices/"
+    if not topic.startswith(base):
+        return None
+
+    parts = topic[len(base) :].split("/")
+    if len(parts) != 3:
+        return None
+
+    device_id, entity_key, kind = parts
+    if not device_id or not entity_key or kind not in COMMAND_KINDS:
+        return None
+
+    return device_id, entity_key, kind
 
 
 # ---------------------------------------------------------------------------
@@ -145,3 +191,52 @@ def vacuum_state_payload(
     if error is not None:
         payload["error"] = error
     return payload
+
+
+# ---------------------------------------------------------------------------
+# Vacuum commands (CONTRACT.md "Component: vacuum" > Commands)
+# ---------------------------------------------------------------------------
+
+
+def command_to_service(topic_kind: str, payload: str) -> tuple[str, dict] | None:
+    """Map an incoming command payload to a ``(service, service_data_extra)`` pair.
+
+    ``topic_kind`` is one of :data:`COMMAND_KINDS` (as returned by
+    :func:`parse_command_topic`). ``service_data_extra`` never includes
+    ``entity_id`` -- the caller adds that from the resolved entity. Returns
+    None for anything that doesn't map to a valid service call (unknown
+    payload, empty payload, unknown topic_kind); the caller should log and
+    ignore.
+    """
+    if topic_kind == "set":
+        if payload in VACUUM_SIMPLE_COMMANDS:
+            return payload, {}
+        return None
+
+    if topic_kind == "set_fan_speed":
+        if not payload:
+            return None
+        return "set_fan_speed", {"fan_speed": payload}
+
+    if topic_kind == "send_command":
+        if not payload:
+            return None
+
+        try:
+            data = json.loads(payload)
+        except (json.JSONDecodeError, TypeError):
+            data = None
+
+        if isinstance(data, dict):
+            command = data.get("command")
+            if not command:
+                return None
+            params = {key: value for key, value in data.items() if key != "command"}
+            extra = {"command": command}
+            if params:
+                extra["params"] = params
+            return "send_command", extra
+
+        return "send_command", {"command": payload}
+
+    return None

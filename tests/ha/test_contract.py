@@ -210,3 +210,126 @@ def test_vacuum_state_payload_rejects_invalid_state():
 def test_vacuum_state_payload_rejects_empty_state():
     with pytest.raises(ValueError):
         contract.vacuum_state_payload(state="")
+
+
+# ---------------------------------------------------------------------------
+# command_topic / parse_command_topic
+# ---------------------------------------------------------------------------
+
+
+def test_command_topic_default_kind_is_set():
+    assert (
+        contract.command_topic(PREFIX, "roomba1", "vacuum")
+        == "ha2fhem/devices/roomba1/vacuum/set"
+    )
+
+
+def test_command_topic_explicit_kinds():
+    assert (
+        contract.command_topic(PREFIX, "roomba1", "vacuum", "set_fan_speed")
+        == "ha2fhem/devices/roomba1/vacuum/set_fan_speed"
+    )
+    assert (
+        contract.command_topic(PREFIX, "roomba1", "vacuum", "send_command")
+        == "ha2fhem/devices/roomba1/vacuum/send_command"
+    )
+
+
+@pytest.mark.parametrize("kind", ["set", "set_fan_speed", "send_command"])
+def test_parse_command_topic_all_kinds(kind):
+    topic = f"ha2fhem/devices/roomba1/vacuum/{kind}"
+    assert contract.parse_command_topic(PREFIX, topic) == ("roomba1", "vacuum", kind)
+
+
+def test_parse_command_topic_custom_prefix():
+    topic = "myprefix/devices/roomba1/vacuum/set"
+    assert contract.parse_command_topic("myprefix", topic) == ("roomba1", "vacuum", "set")
+    # Wrong prefix does not match.
+    assert contract.parse_command_topic(PREFIX, topic) is None
+
+
+def test_parse_command_topic_extracts_device_id_and_entity_key():
+    topic = "ha2fhem/devices/my_bot_2/battery/set"
+    assert contract.parse_command_topic(PREFIX, topic) == ("my_bot_2", "battery", "set")
+
+
+@pytest.mark.parametrize(
+    "topic",
+    [
+        "ha2fhem/devices/roomba1/vacuum/state",  # state topic, not a command
+        "ha2fhem/devices/roomba1/vacuum/unknown_kind",
+        "ha2fhem/devices/roomba1/vacuum",  # missing kind segment
+        "ha2fhem/devices/roomba1/vacuum/set/extra",  # too many segments
+        "ha2fhem/status",
+        "ha2fhem/discovery/vacuum/roomba1_vacuum/config",
+        "other/devices/roomba1/vacuum/set",  # wrong prefix
+    ],
+)
+def test_parse_command_topic_rejects_non_command_topics(topic):
+    assert contract.parse_command_topic(PREFIX, topic) is None
+
+
+# ---------------------------------------------------------------------------
+# command_to_service
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "payload", ["start", "stop", "pause", "return_to_base", "locate", "clean_spot"]
+)
+def test_command_to_service_simple_commands(payload):
+    assert contract.command_to_service("set", payload) == (payload, {})
+
+
+def test_command_to_service_unknown_set_payload_is_none():
+    assert contract.command_to_service("set", "bogus") is None
+
+
+def test_command_to_service_empty_set_payload_is_none():
+    assert contract.command_to_service("set", "") is None
+
+
+def test_command_to_service_fan_speed():
+    assert contract.command_to_service("set_fan_speed", "max") == (
+        "set_fan_speed",
+        {"fan_speed": "max"},
+    )
+
+
+def test_command_to_service_fan_speed_empty_payload_is_none():
+    assert contract.command_to_service("set_fan_speed", "") is None
+
+
+def test_command_to_service_send_command_plain_string():
+    assert contract.command_to_service("send_command", "clean_room") == (
+        "send_command",
+        {"command": "clean_room"},
+    )
+
+
+def test_command_to_service_send_command_json_with_params():
+    payload = '{"command": "go_to", "x": 1, "y": 2}'
+    assert contract.command_to_service("send_command", payload) == (
+        "send_command",
+        {"command": "go_to", "params": {"x": 1, "y": 2}},
+    )
+
+
+def test_command_to_service_send_command_json_without_extra_params():
+    payload = '{"command": "clean_room"}'
+    assert contract.command_to_service("send_command", payload) == (
+        "send_command",
+        {"command": "clean_room"},
+    )
+
+
+def test_command_to_service_send_command_json_missing_command_is_none():
+    assert contract.command_to_service("send_command", '{"x": 1}') is None
+
+
+def test_command_to_service_send_command_empty_payload_is_none():
+    assert contract.command_to_service("send_command", "") is None
+
+
+def test_command_to_service_unknown_topic_kind_is_none():
+    assert contract.command_to_service("bogus_kind", "start") is None
