@@ -52,7 +52,10 @@ sub Set {
 
     if (!exists $commands->{$cmd}) {
         my $list = join ' ', map {
-            $commands->{$_}{widget} ? "$_:$commands->{$_}{widget}" : "$_:noArg"
+            my $c = $commands->{$_};
+            $c->{widget} ? "$_:$c->{widget}"
+          : $c->{arg}    ? "$_:textField"
+          :                "$_:noArg"
         } sort keys %$commands;
         return "Unknown argument $cmd, choose one of $list";
     }
