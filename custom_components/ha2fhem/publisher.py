@@ -23,6 +23,7 @@ from .contract import (
     discovery_topic,
     entity_key,
     state_topic,
+    vacuum_command_topics_extra,
     vacuum_state_payload,
 )
 
@@ -119,6 +120,16 @@ class Publisher:
         extra = None
         if is_main:
             extra = {"schema": "state"}
+            if entry.domain == "vacuum":
+                state = self.hass.states.get(entry.entity_id)
+                attributes = state.attributes if state is not None else {}
+                supported_features = attributes.get("supported_features") or 0
+                fan_speed_list = attributes.get("fan_speed_list") or []
+                extra.update(
+                    vacuum_command_topics_extra(
+                        self.prefix, device_id, key, supported_features, fan_speed_list
+                    )
+                )
 
         payload = discovery_payload(
             self.prefix,

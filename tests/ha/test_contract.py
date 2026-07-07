@@ -333,3 +333,161 @@ def test_command_to_service_send_command_empty_payload_is_none():
 
 def test_command_to_service_unknown_topic_kind_is_none():
     assert contract.command_to_service("bogus_kind", "start") is None
+
+
+# ---------------------------------------------------------------------------
+# vacuum_features — bitmask -> contract feature names
+# (homeassistant.components.vacuum.VacuumEntityFeature bit values)
+# ---------------------------------------------------------------------------
+
+
+def test_vacuum_features_zero_is_empty():
+    assert contract.vacuum_features(0) == []
+
+
+def test_vacuum_features_real_world_bitmask_13084():
+    # Real-world example from a production install: START(8192) + STATE(4096)
+    # + LOCATE(512) + SEND_COMMAND(256) + RETURN_HOME(16) + STOP(8) + PAUSE(4).
+    # No FAN_SPEED(32) bit, no CLEAN_SPOT(1024) bit.
+    assert contract.vacuum_features(13084) == [
+        "locate",
+        "pause",
+        "return_home",
+        "send_command",
+        "start",
+        "status",
+        "stop",
+    ]
+    assert "fan_speed" not in contract.vacuum_features(13084)
+    assert "clean_spot" not in contract.vacuum_features(13084)
+
+
+def test_vacuum_features_full_mask_has_everything():
+    full_mask = (
+        contract.VACUUM_FEATURE_TURN_ON
+        | contract.VACUUM_FEATURE_TURN_OFF
+        | contract.VACUUM_FEATURE_PAUSE
+        | contract.VACUUM_FEATURE_STOP
+        | contract.VACUUM_FEATURE_RETURN_HOME
+        | contract.VACUUM_FEATURE_FAN_SPEED
+        | contract.VACUUM_FEATURE_BATTERY
+        | contract.VACUUM_FEATURE_STATUS
+        | contract.VACUUM_FEATURE_SEND_COMMAND
+        | contract.VACUUM_FEATURE_LOCATE
+        | contract.VACUUM_FEATURE_CLEAN_SPOT
+        | contract.VACUUM_FEATURE_MAP
+        | contract.VACUUM_FEATURE_STATE
+        | contract.VACUUM_FEATURE_START
+    )
+    assert contract.vacuum_features(full_mask) == [
+        "clean_spot",
+        "fan_speed",
+        "locate",
+        "pause",
+        "return_home",
+        "send_command",
+        "start",
+        "status",
+        "stop",
+    ]
+
+
+def test_vacuum_features_status_dedupes_status_and_state_bits():
+    both = contract.VACUUM_FEATURE_STATUS | contract.VACUUM_FEATURE_STATE
+    assert contract.vacuum_features(both) == ["status"]
+
+
+def test_vacuum_features_ignores_turn_on_off_battery_map():
+    ignored = (
+        contract.VACUUM_FEATURE_TURN_ON
+        | contract.VACUUM_FEATURE_TURN_OFF
+        | contract.VACUUM_FEATURE_BATTERY
+        | contract.VACUUM_FEATURE_MAP
+    )
+    assert contract.vacuum_features(ignored) == []
+
+
+# ---------------------------------------------------------------------------
+# vacuum_command_topics_extra
+# ---------------------------------------------------------------------------
+
+
+def test_vacuum_command_topics_extra_includes_command_topics():
+    extra = contract.vacuum_command_topics_extra(PREFIX, "roomba1", "vacuum", 13084)
+    assert extra["command_topic"] == "ha2fhem/devices/roomba1/vacuum/set"
+    assert extra["set_fan_speed_topic"] == "ha2fhem/devices/roomba1/vacuum/set_fan_speed"
+    assert extra["send_command_topic"] == "ha2fhem/devices/roomba1/vacuum/send_command"
+    assert extra["supported_features"] == [
+        "locate",
+        "pause",
+        "return_home",
+        "send_command",
+        "start",
+        "status",
+        "stop",
+    ]
+    assert "fan_speed_list" not in extra
+
+
+def test_vacuum_command_topics_extra_includes_fan_speed_list_only_with_fan_speed_bit():
+    extra = contract.vacuum_command_topics_extra(
+        PREFIX,
+        "roomba1",
+        "vacuum",
+        contract.VACUUM_FEATURE_FAN_SPEED,
+        fan_speed_list=["min", "medium", "high", "max"],
+    )
+    assert extra["supported_features"] == ["fan_speed"]
+    assert extra["fan_speed_list"] == ["min", "medium", "high", "max"]
+
+
+def test_vacuum_command_topics_extra_no_fan_speed_bit_omits_fan_speed_list_even_if_given():
+    extra = contract.vacuum_command_topics_extra(
+        PREFIX,
+        "roomba1",
+        "vacuum",
+        contract.VACUUM_FEATURE_START,
+        fan_speed_list=["min", "max"],
+    )
+    assert "fan_speed_list" not in extra
+
+
+def test_vacuum_command_topics_extra_zero_features():
+    extra = contract.vacuum_command_topics_extra(PREFIX, "roomba1", "vacuum", 0)
+    assert extra["supported_features"] == []
+    assert "fan_speed_list" not in extra
+
+
+def test_vacuum_command_topics_extra_merges_into_discovery_payload_via_extra():
+    # This is how publisher.py wires it: extra = {"schema": "state", **vacuum_command_topics_extra(...)}
+    extra = {"schema": "state"}
+    extra.update(
+        contract.vacuum_command_topics_extra(
+            PREFIX, "roomba1", "vacuum", contract.VACUUM_FEATURE_FAN_SPEED, ["min", "max"]
+        )
+    )
+    payload = contract.discovery_payload(
+        PREFIX, "vacuum", "roomba1", "vacuum", "Roomba", "Roomba", extra=extra
+    )
+    assert payload["command_topic"] == "ha2fhem/devices/roomba1/vacuum/set"
+    assert payload["set_fan_speed_topic"] == "ha2fhem/devices/roomba1/vacuum/set_fan_speed"
+    assert payload["send_command_topic"] == "ha2fhem/devices/roomba1/vacuum/send_command"
+    assert payload["supported_features"] == ["fan_speed"]
+    assert payload["fan_speed_list"] == ["min", "max"]
+    # unaffected structural fields
+    assert payload["unique_id"] == "ha2fhem_roomba1_vacuum"
+
+
+def test_discovery_payload_sibling_sensor_has_no_command_topics():
+    # Sensor/binary_sensor siblings never get vacuum command topics -- only
+    # the main (controllable) entity does. publisher.py only calls
+    # vacuum_command_topics_extra for is_main entities, so a sibling's extra
+    # is None/absent; document that the resulting payload stays untouched.
+    payload = contract.discovery_payload(
+        PREFIX, "sensor", "roomba1", "battery", "Roomba", "Battery"
+    )
+    assert "command_topic" not in payload
+    assert "set_fan_speed_topic" not in payload
+    assert "send_command_topic" not in payload
+    assert "supported_features" not in payload
+    assert "fan_speed_list" not in payload

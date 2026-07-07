@@ -194,6 +194,83 @@ def vacuum_state_payload(
 
 
 # ---------------------------------------------------------------------------
+# Vacuum supported_features (CONTRACT.md "Component: vacuum" > supported_features)
+#
+# Bit values match homeassistant.components.vacuum.VacuumEntityFeature. Kept
+# as plain constants here (not imported from homeassistant) so this module
+# stays free of any ``homeassistant`` import.
+# ---------------------------------------------------------------------------
+
+VACUUM_FEATURE_TURN_ON = 1
+VACUUM_FEATURE_TURN_OFF = 2
+VACUUM_FEATURE_PAUSE = 4
+VACUUM_FEATURE_STOP = 8
+VACUUM_FEATURE_RETURN_HOME = 16
+VACUUM_FEATURE_FAN_SPEED = 32
+VACUUM_FEATURE_BATTERY = 64
+VACUUM_FEATURE_STATUS = 128
+VACUUM_FEATURE_SEND_COMMAND = 256
+VACUUM_FEATURE_LOCATE = 512
+VACUUM_FEATURE_CLEAN_SPOT = 1024
+VACUUM_FEATURE_MAP = 2048
+VACUUM_FEATURE_STATE = 4096
+VACUUM_FEATURE_START = 8192
+
+# Maps a VacuumEntityFeature bit to the contract feature name it drives.
+# TURN_ON/TURN_OFF/BATTERY/MAP have no FHEM-side setter to gate and are
+# deliberately left out; STATUS and STATE both collapse to "status".
+_VACUUM_FEATURE_BITS = {
+    VACUUM_FEATURE_START: "start",
+    VACUUM_FEATURE_STOP: "stop",
+    VACUUM_FEATURE_PAUSE: "pause",
+    VACUUM_FEATURE_RETURN_HOME: "return_home",
+    VACUUM_FEATURE_LOCATE: "locate",
+    VACUUM_FEATURE_CLEAN_SPOT: "clean_spot",
+    VACUUM_FEATURE_FAN_SPEED: "fan_speed",
+    VACUUM_FEATURE_SEND_COMMAND: "send_command",
+    VACUUM_FEATURE_STATUS: "status",
+    VACUUM_FEATURE_STATE: "status",
+}
+
+
+def vacuum_features(supported_features: int) -> list[str]:
+    """Decode a HA vacuum ``supported_features`` bitmask into contract names.
+
+    Returns the sorted, de-duplicated subset of CONTRACT.md's ``start, stop,
+    pause, return_home, status, locate, clean_spot, fan_speed, send_command``
+    that the bitmask sets.
+    """
+    return sorted(
+        {name for bit, name in _VACUUM_FEATURE_BITS.items() if supported_features & bit}
+    )
+
+
+def vacuum_command_topics_extra(
+    prefix: str,
+    device_id: str,
+    entity_key: str,
+    supported_features: int,
+    fan_speed_list: list[str] | None = None,
+) -> dict:
+    """Build the discovery ``extra`` fields for the controllable vacuum entity.
+
+    Adds the three command topics and ``supported_features`` (as contract
+    feature names, CONTRACT.md "Component: vacuum" > Commands). ``fan_speed_list``
+    is only included when the ``fan_speed`` feature is present.
+    """
+    features = vacuum_features(supported_features)
+    extra = {
+        "command_topic": command_topic(prefix, device_id, entity_key, "set"),
+        "set_fan_speed_topic": command_topic(prefix, device_id, entity_key, "set_fan_speed"),
+        "send_command_topic": command_topic(prefix, device_id, entity_key, "send_command"),
+        "supported_features": features,
+    }
+    if "fan_speed" in features:
+        extra["fan_speed_list"] = list(fan_speed_list or [])
+    return extra
+
+
+# ---------------------------------------------------------------------------
 # Vacuum commands (CONTRACT.md "Component: vacuum" > Commands)
 # ---------------------------------------------------------------------------
 
