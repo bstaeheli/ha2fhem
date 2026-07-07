@@ -44,13 +44,21 @@ sub Undef {
     return;
 }
 
-# AssignIoPort + clientOrder may not be possible while FHEM is still booting
-# (IO device not defined yet) -> retry a few times.
+# AssignIoPort only picks IOs whose Clients list contains our TYPE, so the
+# clientOrder registration must happen BEFORE the assignment. May not be
+# possible while FHEM is still booting (IO not defined yet) -> retry.
 sub _setupIO {
     my ($hash, $tries) = @_;
     my $name = $hash->{NAME};
 
-    ::AssignIoPort($hash) if !$hash->{IODev};
+    if (!$hash->{IODev}) {
+        my $wish = ::AttrVal($name, 'IODev', '');
+        my @ios = $wish ne '' ? ($wish)
+                : grep { ($main::defs{$_}{TYPE} // '') =~ /^MQTT2_(CLIENT|SERVER)$/ }
+                  sort keys %main::defs;
+        _registerClientOrder($name, $_) for @ios;
+        ::AssignIoPort($hash);
+    }
     my $io = $hash->{IODev};
 
     if (!$io) {
@@ -65,14 +73,6 @@ sub _setupIO {
     }
 
     my $ioName = $io->{NAME};
-    my $co = ::AttrVal($ioName, 'clientOrder', '');
-    if ($co !~ /\bHA2FHEM_BRIDGE\b/) {
-        $co = $co eq ''
-            ? 'HA2FHEM_BRIDGE MQTT2_DEVICE MQTT_GENERIC_BRIDGE'
-            : "HA2FHEM_BRIDGE $co";
-        ::CommandAttr(undef, "$ioName clientOrder $co");
-        ::Log3($name, 3, "$name: registered HA2FHEM_BRIDGE in clientOrder of $ioName");
-    }
 
     my $prefix = ::AttrVal($name, 'topicPrefix', 'ha2fhem');
     if (::AttrVal($ioName, 'ignoreRegexp', '') !~ /\Q$prefix\E/) {
@@ -81,6 +81,19 @@ sub _setupIO {
     }
 
     ::readingsSingleUpdate($hash, 'state', 'active', 1);
+    return;
+}
+
+sub _registerClientOrder {
+    my ($name, $ioName) = @_;
+    return if !$main::defs{$ioName};
+    my $co = ::AttrVal($ioName, 'clientOrder', '');
+    return if $co =~ /\bHA2FHEM_BRIDGE\b/;
+    $co = $co eq ''
+        ? 'HA2FHEM_BRIDGE MQTT2_DEVICE MQTT_GENERIC_BRIDGE'
+        : "HA2FHEM_BRIDGE $co";
+    ::CommandAttr(undef, "$ioName clientOrder $co");
+    ::Log3($name, 3, "$name: registered HA2FHEM_BRIDGE in clientOrder of $ioName");
     return;
 }
 
