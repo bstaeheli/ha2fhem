@@ -15,7 +15,9 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
 git init --quiet --bare --object-format=sha1 "$tmp/sha1.git"
-git fast-export --all --signed-tags=strip --tag-of-filtered-object=drop \
+# shellcheck disable=SC2046 -- ref names contain no spaces
+git fast-export --signed-tags=strip --tag-of-filtered-object=drop \
+    $(git for-each-ref --format='%(refname)' refs/heads refs/tags) \
     | git -C "$tmp/sha1.git" fast-import --quiet
 git -C "$tmp/sha1.git" push --quiet --mirror \
     "https://${GITHUB_MIRROR_USER}:${GITHUB_MIRROR_TOKEN}@github.com/${GITHUB_MIRROR_REPO}.git"
