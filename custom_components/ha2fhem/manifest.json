@@ -1,0 +1,12 @@
+{
+  "domain": "ha2fhem",
+  "name": "ha2fhem",
+  "dependencies": ["mqtt"],
+  "config_flow": true,
+  "iot_class": "local_push",
+  "version": "0.1.0",
+  "codeowners": ["@bstaeheli"],
+  "documentation": "https://codeberg.org/bstaeheli/ha2fhem",
+  "issue_tracker": "https://codeberg.org/bstaeheli/ha2fhem/issues",
+  "requirements": []
+}
