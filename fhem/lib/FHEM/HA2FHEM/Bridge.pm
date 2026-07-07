@@ -32,8 +32,8 @@ sub Define {
     $main::modules{HA2FHEM_BRIDGE}{defptr}{$name} = $hash;
     $hash->{devices} = {};    # device_id => { entities => { key => entity } }
 
-    _setupIO($hash, 0);
     ::readingsSingleUpdate($hash, 'state', 'defined', 0);
+    _setupIO($hash, 0);
     return;
 }
 
