@@ -218,6 +218,7 @@ sub _createChild {
     ::CommandAttr(undef, "$cname room HA2FHEM");
     my $chash = $main::defs{$cname};
     $chash->{bridge} = $bname;
+    $chash->{IODev}  = $bridge->{IODev};
     ::Log3($bname, 3, "$bname: created child $cname for HA device $did "
          . "($entity->{component})");
     return $chash;
