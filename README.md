@@ -23,6 +23,14 @@ Early development. The roadmap lives in the [issues and milestones](https://code
 
 So both sides are real builds. See the pinned roadmap issue for the architecture.
 
+## GitHub mirror
+
+Development happens here on Codeberg. The [GitHub mirror](https://github.com/bstaeheli/ha2fhem)
+exists only because HACS requires GitHub — it is read-only and updated
+manually (`tools/mirror-to-github.sh`; commit hashes differ, the Codeberg
+repo uses git's SHA-256 object format which GitHub does not support).
+Issues and pull requests: Codeberg only.
+
 ## Contributing
 
 Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). Issues and discussion in English preferred (German fine too).
