@@ -1,0 +1,21 @@
+# secrets / local-only — never commit
+.envrc
+.mcp.json
+.claude/settings.local.json
+
+# local planning doc
+ha2fhem-project-plan.md
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# editors / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
