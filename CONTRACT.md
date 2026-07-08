@@ -175,6 +175,52 @@ expose all, same rule as vacuum. Tilt is out of scope for now.
 
 Discovery config carries `command_topic` and `set_position_topic`.
 
+## Component: `switch`
+
+### State
+
+Topic: `ha2fhem/devices/<device_id>/switch/state` — JSON dict:
+
+| Key | Required | Values |
+|-----|----------|--------|
+| `state` | yes | `on` / `off` |
+
+```json
+{"state": "on"}
+```
+
+### Commands
+
+Topic: `ha2fhem/devices/<device_id>/switch/set` — plain payloads per the HA
+MQTT switch platform: `ON` → `switch.turn_on`, `OFF` → `switch.turn_off`.
+FHEM setters: `on` / `off`. Switches have no `supported_features`; the key is
+never published and FHEM always exposes both setters.
+
+## Component: `light`
+
+Scope: plain on/off (issue #14). Brightness/color **setters** are out of
+scope for now; `brightness` is mirrored read-only when HA reports it.
+
+### State
+
+Topic: `ha2fhem/devices/<device_id>/light/state` — JSON dict:
+
+| Key | Required | Values |
+|-----|----------|--------|
+| `state` | yes | `on` / `off` |
+| `brightness` | no | 0–255 (omitted when unknown/off) |
+
+```json
+{"state": "on", "brightness": 128}
+```
+
+### Commands
+
+Topic: `ha2fhem/devices/<device_id>/light/set` — plain payloads:
+`ON` → `light.turn_on`, `OFF` → `light.turn_off`. FHEM setters: `on` / `off`.
+`supported_features` is not published for lights (feature negotiation comes
+with the brightness/color follow-up).
+
 ## Example payloads
 
 Machine-readable examples for both sides' tests live in `tests/payloads/`
