@@ -19,6 +19,14 @@ our %PROFILES = (
         # per CONTRACT.md, Component: cover > State
         state_keys => [qw(state position)],
     },
+    switch => {
+        # per CONTRACT.md, Component: switch > State
+        state_keys => [qw(state)],
+    },
+    light => {
+        # per CONTRACT.md, Component: light > State
+        state_keys => [qw(state brightness)],
+    },
 );
 
 # Per-component set commands on the `set` topic: FHEM set name => { feature,
@@ -41,6 +49,16 @@ our %COMMANDS = (
         open  => { feature => 'open',  payload => 'OPEN' },
         close => { feature => 'close', payload => 'CLOSE' },
         stop  => { feature => 'stop',  payload => 'STOP' },
+    },
+    # switch/light never publish supported_features (CONTRACT.md), so $gate
+    # is always false for these and both setters always show.
+    switch => {
+        on  => { feature => 'on',  payload => 'ON' },
+        off => { feature => 'off', payload => 'OFF' },
+    },
+    light => {
+        on  => { feature => 'on',  payload => 'ON' },
+        off => { feature => 'off', payload => 'OFF' },
     },
 );
 

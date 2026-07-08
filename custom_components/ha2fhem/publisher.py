@@ -25,7 +25,11 @@ from .contract import (
     discovery_payload,
     discovery_topic,
     entity_key,
+    light_command_topics_extra,
+    light_state_payload,
     state_topic,
+    switch_command_topics_extra,
+    switch_state_payload,
     vacuum_command_topics_extra,
     vacuum_state_payload,
 )
@@ -33,7 +37,7 @@ from .contract import (
 _LOGGER = logging.getLogger(__name__)
 
 SENSOR_DOMAINS = ("sensor", "binary_sensor")
-MAIN_DOMAINS = ("vacuum", "cover")
+MAIN_DOMAINS = ("vacuum", "cover", "switch", "light")
 
 
 def _matches_filter(value: str, filter_str: str) -> bool:
@@ -149,6 +153,10 @@ class Publisher:
                         self.prefix, device_id, key, supported_features
                     )
                 )
+            elif entry.domain == "switch":
+                extra.update(switch_command_topics_extra(self.prefix, device_id, key))
+            elif entry.domain == "light":
+                extra.update(light_command_topics_extra(self.prefix, device_id, key))
 
         payload = discovery_payload(
             self.prefix,
@@ -234,6 +242,35 @@ class Publisher:
                     else _LOGGER.warning
                 )
                 log("ignoring unmappable cover state %r for %s", new_state.state, entity_id)
+                return
+            body = _dumps(payload)
+        elif is_main and domain == "switch":
+            try:
+                payload = switch_state_payload(state=new_state.state)
+            except ValueError:
+                # unavailable/unknown is the switch being asleep, not a bug
+                log = (
+                    _LOGGER.debug
+                    if new_state.state in ("unavailable", "unknown")
+                    else _LOGGER.warning
+                )
+                log("ignoring unmappable switch state %r for %s", new_state.state, entity_id)
+                return
+            body = _dumps(payload)
+        elif is_main and domain == "light":
+            try:
+                payload = light_state_payload(
+                    state=new_state.state,
+                    brightness=new_state.attributes.get("brightness"),
+                )
+            except ValueError:
+                # unavailable/unknown is the light being asleep, not a bug
+                log = (
+                    _LOGGER.debug
+                    if new_state.state in ("unavailable", "unknown")
+                    else _LOGGER.warning
+                )
+                log("ignoring unmappable light state %r for %s", new_state.state, entity_id)
                 return
             body = _dumps(payload)
         elif domain == "binary_sensor":

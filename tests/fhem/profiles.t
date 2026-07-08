@@ -8,8 +8,12 @@ use FHEM::HA2FHEM::Profiles;
 
 ok(FHEM::HA2FHEM::Profiles::known_profile('vacuum'), 'vacuum profile exists');
 ok(FHEM::HA2FHEM::Profiles::known_profile('cover'), 'cover profile exists');
+ok(FHEM::HA2FHEM::Profiles::known_profile('switch'), 'switch profile exists');
+ok(FHEM::HA2FHEM::Profiles::known_profile('light'), 'light profile exists');
 ok(FHEM::HA2FHEM::Profiles::is_main_component('vacuum'), 'vacuum is main');
 ok(FHEM::HA2FHEM::Profiles::is_main_component('cover'), 'cover is main');
+ok(FHEM::HA2FHEM::Profiles::is_main_component('switch'), 'switch is main');
+ok(FHEM::HA2FHEM::Profiles::is_main_component('light'), 'light is main');
 ok(!FHEM::HA2FHEM::Profiles::is_main_component('sensor'), 'sensor is not');
 
 # CONTRACT.md example payload, main entity

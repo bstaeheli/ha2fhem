@@ -705,4 +705,147 @@ def test_command_to_service_cover_unknown_topic_kind_is_none():
 
 
 def test_command_to_service_unknown_component_is_none():
-    assert contract.command_to_service("switch", "set", "ON") is None
+    assert contract.command_to_service("climate", "set", "ON") is None
+
+
+# ---------------------------------------------------------------------------
+# switch_state_payload / light_state_payload — cross-checked against
+# CONTRACT.md "Component: switch" / "Component: light" examples:
+# {"state": "on"} / {"state": "on", "brightness": 128}
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("state", ["on", "off"])
+def test_switch_state_payload_accepts_contract_states(state):
+    assert contract.switch_state_payload(state=state) == {"state": state}
+
+
+def test_switch_state_payload_rejects_invalid_state():
+    with pytest.raises(ValueError, match="invalid switch state"):
+        contract.switch_state_payload(state="unknown")
+
+
+def test_switch_state_payload_rejects_empty_state():
+    with pytest.raises(ValueError):
+        contract.switch_state_payload(state="")
+
+
+@pytest.mark.parametrize("state", ["on", "off"])
+def test_light_state_payload_accepts_contract_states(state):
+    assert contract.light_state_payload(state=state) == {"state": state}
+
+
+def test_light_state_payload_contract_example():
+    payload = contract.light_state_payload(state="on", brightness=128)
+    assert payload == {"state": "on", "brightness": 128}
+
+
+def test_light_state_payload_omits_none_brightness():
+    payload = contract.light_state_payload(state="off")
+    assert payload == {"state": "off"}
+    assert "brightness" not in payload
+
+
+def test_light_state_payload_brightness_zero_is_not_omitted():
+    # brightness=0 must survive: "not None" is the omission test, not truthiness
+    payload = contract.light_state_payload(state="on", brightness=0)
+    assert payload == {"state": "on", "brightness": 0}
+
+
+def test_light_state_payload_rejects_invalid_state():
+    with pytest.raises(ValueError, match="invalid light state"):
+        contract.light_state_payload(state="unknown")
+
+
+def test_light_state_payload_rejects_empty_state():
+    with pytest.raises(ValueError):
+        contract.light_state_payload(state="")
+
+
+# ---------------------------------------------------------------------------
+# switch_command_topics_extra / light_command_topics_extra
+# ---------------------------------------------------------------------------
+
+
+def test_switch_command_topics_extra_includes_command_topic_only():
+    extra = contract.switch_command_topics_extra(PREFIX, "sw1", "switch")
+    assert extra == {"command_topic": "ha2fhem/devices/sw1/switch/set"}
+
+
+def test_light_command_topics_extra_includes_command_topic_only():
+    extra = contract.light_command_topics_extra(PREFIX, "lamp1", "light")
+    assert extra == {"command_topic": "ha2fhem/devices/lamp1/light/set"}
+
+
+def test_switch_command_topics_extra_merges_into_discovery_payload_via_extra():
+    extra = {"schema": "state"}
+    extra.update(contract.switch_command_topics_extra(PREFIX, "sw1", "switch"))
+    payload = contract.discovery_payload(
+        PREFIX, "switch", "sw1", "switch", "Switch", "Switch", extra=extra
+    )
+    assert payload["command_topic"] == "ha2fhem/devices/sw1/switch/set"
+    assert "supported_features" not in payload
+    assert payload["unique_id"] == "ha2fhem_sw1_switch"
+
+
+def test_light_command_topics_extra_merges_into_discovery_payload_via_extra():
+    extra = {"schema": "state"}
+    extra.update(contract.light_command_topics_extra(PREFIX, "lamp1", "light"))
+    payload = contract.discovery_payload(
+        PREFIX, "light", "lamp1", "light", "Light", "Light", extra=extra
+    )
+    assert payload["command_topic"] == "ha2fhem/devices/lamp1/light/set"
+    assert "supported_features" not in payload
+    assert payload["unique_id"] == "ha2fhem_lamp1_light"
+
+
+# ---------------------------------------------------------------------------
+# command_to_service — switch / light mappings
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("component", ["switch", "light"])
+def test_command_to_service_switch_light_on(component):
+    assert contract.command_to_service(component, "set", "ON") == ("turn_on", {})
+
+
+@pytest.mark.parametrize("component", ["switch", "light"])
+def test_command_to_service_switch_light_off(component):
+    assert contract.command_to_service(component, "set", "OFF") == ("turn_off", {})
+
+
+@pytest.mark.parametrize("component", ["switch", "light"])
+def test_command_to_service_switch_light_lowercase_payload_is_none(component):
+    # CONTRACT.md mandates the HA MQTT platform's uppercase ON/OFF payloads
+    assert contract.command_to_service(component, "set", "on") is None
+
+
+@pytest.mark.parametrize("component", ["switch", "light"])
+def test_command_to_service_switch_light_empty_payload_is_none(component):
+    assert contract.command_to_service(component, "set", "") is None
+
+
+@pytest.mark.parametrize("component", ["switch", "light"])
+def test_command_to_service_switch_light_unknown_payload_is_none(component):
+    assert contract.command_to_service(component, "set", "bogus") is None
+
+
+def test_command_to_service_set_position_on_switch_is_none():
+    # switch has no set_position topic_kind; regression against cover's schema
+    assert contract.command_to_service("switch", "set_position", "42") is None
+
+
+def test_command_to_service_set_position_on_light_is_none():
+    assert contract.command_to_service("light", "set_position", "42") is None
+
+
+# ---------------------------------------------------------------------------
+# Regression: vacuum/cover behavior is unchanged by the switch/light additions
+# ---------------------------------------------------------------------------
+
+
+def test_command_to_service_vacuum_cover_unaffected_by_switch_light_additions():
+    assert contract.command_to_service("vacuum", "set", "start") == ("start", {})
+    assert contract.command_to_service("cover", "set", "OPEN") == ("open_cover", {})
+    assert contract.command_to_service("cover", "set", "ON") is None
+    assert contract.command_to_service("vacuum", "set", "ON") is None

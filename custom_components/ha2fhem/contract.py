@@ -17,6 +17,9 @@ VACUUM_STATES = {"cleaning", "docked", "idle", "paused", "returning", "error"}
 # CONTRACT.md "Component: cover" > State
 COVER_STATES = {"open", "opening", "closed", "closing", "stopped"}
 
+# CONTRACT.md "Component: switch" / "Component: light" > State
+SWITCH_LIGHT_STATES = {"on", "off"}
+
 # Command topic kinds, i.e. the last segment of a command topic
 # (`<prefix>/devices/<device_id>/<entity_key>/<kind>`).
 COMMAND_KINDS = {"set", "set_fan_speed", "send_command", "set_position"}
@@ -246,6 +249,42 @@ def cover_state_payload(state: str, position: int | None = None) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Switch / light state payloads (CONTRACT.md "Component: switch" / "light")
+# ---------------------------------------------------------------------------
+
+
+def switch_state_payload(state: str) -> dict:
+    """Build the flat switch state JSON per CONTRACT.md.
+
+    Example: {"state": "on"}
+    """
+    if state not in SWITCH_LIGHT_STATES:
+        raise ValueError(
+            f"invalid switch state {state!r}, must be one of {sorted(SWITCH_LIGHT_STATES)}"
+        )
+    return {"state": state}
+
+
+def light_state_payload(state: str, brightness: int | None = None) -> dict:
+    """Build the flat light state JSON per CONTRACT.md.
+
+    ``brightness`` is mirrored read-only when HA reports it (only meaningful
+    when the light is on, but that's HA's call to make, not ours -- we just
+    pass through what it gives us).
+
+    Example: {"state": "on", "brightness": 128}
+    """
+    if state not in SWITCH_LIGHT_STATES:
+        raise ValueError(
+            f"invalid light state {state!r}, must be one of {sorted(SWITCH_LIGHT_STATES)}"
+        )
+    payload: dict = {"state": state}
+    if brightness is not None:
+        payload["brightness"] = brightness
+    return payload
+
+
+# ---------------------------------------------------------------------------
 # Vacuum supported_features (CONTRACT.md "Component: vacuum" > supported_features)
 #
 # Bit values match homeassistant.components.vacuum.VacuumEntityFeature. Kept
@@ -377,26 +416,58 @@ def cover_command_topics_extra(
 
 
 # ---------------------------------------------------------------------------
-# Commands (CONTRACT.md "Component: vacuum" / "Component: cover" > Commands)
+# Switch / light command topics (CONTRACT.md "Component: switch" / "light")
+#
+# Neither publishes supported_features: switch has none, light's feature
+# negotiation waits for the brightness/color follow-up.
 # ---------------------------------------------------------------------------
+
+
+def switch_command_topics_extra(prefix: str, device_id: str, entity_key: str) -> dict:
+    """Build the discovery ``extra`` fields for the controllable switch entity."""
+    return {"command_topic": command_topic(prefix, device_id, entity_key, "set")}
+
+
+def light_command_topics_extra(prefix: str, device_id: str, entity_key: str) -> dict:
+    """Build the discovery ``extra`` fields for the controllable light entity."""
+    return {"command_topic": command_topic(prefix, device_id, entity_key, "set")}
+
+
+# ---------------------------------------------------------------------------
+# Commands (CONTRACT.md "Component: vacuum" / "cover" / "switch" / "light")
+# ---------------------------------------------------------------------------
+
+
+# Plain payloads on the `set` command topic that map 1:1 to a switch/light
+# service call (CONTRACT.md "Component: switch" / "light" > Commands).
+SWITCH_LIGHT_SIMPLE_COMMANDS = {"ON": "turn_on", "OFF": "turn_off"}
 
 
 def command_to_service(component: str, topic_kind: str, payload: str) -> tuple[str, dict] | None:
     """Map an incoming command payload to a ``(service, service_data_extra)`` pair.
 
-    ``component`` is the HA domain of the main entity (``vacuum`` or
-    ``cover``). ``topic_kind`` is one of :data:`COMMAND_KINDS` (as returned by
-    :func:`parse_command_topic`). ``service_data_extra`` never includes
-    ``entity_id`` -- the caller adds that from the resolved entity. Returns
-    None for anything that doesn't map to a valid service call (unknown
-    payload, empty payload, unknown topic_kind/component combination); the
-    caller should log and ignore.
+    ``component`` is the HA domain of the main entity (``vacuum``, ``cover``,
+    ``switch`` or ``light``). ``topic_kind`` is one of :data:`COMMAND_KINDS`
+    (as returned by :func:`parse_command_topic`). ``service_data_extra``
+    never includes ``entity_id`` -- the caller adds that from the resolved
+    entity. Returns None for anything that doesn't map to a valid service
+    call (unknown payload, empty payload, unknown topic_kind/component
+    combination); the caller should log and ignore.
     """
     if component == "vacuum":
         return _vacuum_command_to_service(topic_kind, payload)
     if component == "cover":
         return _cover_command_to_service(topic_kind, payload)
+    if component in ("switch", "light"):
+        return _switch_light_command_to_service(topic_kind, payload)
     return None
+
+
+def _switch_light_command_to_service(topic_kind: str, payload: str) -> tuple[str, dict] | None:
+    if topic_kind != "set":
+        return None
+    service = SWITCH_LIGHT_SIMPLE_COMMANDS.get(payload)
+    return (service, {}) if service else None
 
 
 def _vacuum_command_to_service(topic_kind: str, payload: str) -> tuple[str, dict] | None:
