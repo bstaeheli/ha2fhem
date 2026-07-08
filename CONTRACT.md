@@ -138,6 +138,43 @@ and appear as readings on the same FHEM child.
 mapped by the HA side); any other state (`unknown`, ...) passes through
 unchanged.
 
+## Component: `cover` (second device class)
+
+### State
+
+Topic: `ha2fhem/devices/<device_id>/cover/state` — JSON dict (pre-rendered,
+flat; position folded into the state JSON instead of a separate
+`position_topic` so the consumer needs no extra topic route):
+
+| Key | Required | Values |
+|-----|----------|--------|
+| `state` | yes | `open` / `opening` / `closed` / `closing` / `stopped` |
+| `position` | no | 0–100 (omitted when unknown) |
+
+```json
+{"state": "open", "position": 75}
+```
+
+The HA side publishes the entity's real state — including `stopped` — so the
+consumer never has to infer it (the naive-`stopped` problem of HA's MQTT cover
+platform does not apply here).
+
+### Commands
+
+Topic: `ha2fhem/devices/<device_id>/cover/set` — plain payloads per the HA
+MQTT cover platform: `OPEN` → `cover.open_cover`, `CLOSE` →
+`cover.close_cover`, `STOP` → `cover.stop_cover`.
+
+Position on `ha2fhem/devices/<device_id>/cover/set_position`: integer 0–100 →
+`cover.set_cover_position`.
+
+`supported_features` in the discovery config is a subset of
+`open, close, stop, set_position` and gates the FHEM setters
+(FHEM: `open` / `close` / `stop` / `pct:slider,0,1,100`). Omitted = unknown =
+expose all, same rule as vacuum. Tilt is out of scope for now.
+
+Discovery config carries `command_topic` and `set_position_topic`.
+
 ## Example payloads
 
 Machine-readable examples for both sides' tests live in `tests/payloads/`
