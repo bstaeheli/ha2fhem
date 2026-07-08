@@ -490,10 +490,13 @@ def test_vacuum_command_topics_extra_no_fan_speed_bit_omits_fan_speed_list_even_
     assert "fan_speed_list" not in extra
 
 
-def test_vacuum_command_topics_extra_zero_features():
+def test_vacuum_command_topics_extra_zero_features_omits_key():
+    # 0 = unknown (entity unavailable at startup) -> key omitted per
+    # CONTRACT.md, FHEM then exposes all setters instead of none
     extra = contract.vacuum_command_topics_extra(PREFIX, "roomba1", "vacuum", 0)
-    assert extra["supported_features"] == []
+    assert "supported_features" not in extra
     assert "fan_speed_list" not in extra
+    assert extra["command_topic"] == f"{PREFIX}/devices/roomba1/vacuum/set"
 
 
 def test_vacuum_command_topics_extra_merges_into_discovery_payload_via_extra():

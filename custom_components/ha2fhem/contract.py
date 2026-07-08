@@ -284,17 +284,20 @@ def vacuum_command_topics_extra(
 
     Adds the three command topics and ``supported_features`` (as contract
     feature names, CONTRACT.md "Component: vacuum" > Commands). ``fan_speed_list``
-    is only included when the ``fan_speed`` feature is present.
+    is only included when the ``fan_speed`` feature is present. A bitmask of 0
+    means "unknown" (entity unavailable, e.g. at HA startup) — per CONTRACT.md
+    the key is then omitted so the FHEM side exposes all setters, not none.
     """
-    features = vacuum_features(supported_features)
     extra = {
         "command_topic": command_topic(prefix, device_id, entity_key, "set"),
         "set_fan_speed_topic": command_topic(prefix, device_id, entity_key, "set_fan_speed"),
         "send_command_topic": command_topic(prefix, device_id, entity_key, "send_command"),
-        "supported_features": features,
     }
-    if "fan_speed" in features:
-        extra["fan_speed_list"] = list(fan_speed_list or [])
+    if supported_features:
+        features = vacuum_features(supported_features)
+        extra["supported_features"] = features
+        if "fan_speed" in features:
+            extra["fan_speed_list"] = list(fan_speed_list or [])
     return extra
 
 

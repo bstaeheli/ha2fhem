@@ -93,7 +93,7 @@ class Publisher:
             key = await self._publish_entity_discovery(
                 main_entry, device_id, device_name, is_main=True
             )
-            self._subscribe_state(main_entry.entity_id, device_id, key, is_main=True)
+            await self._start_entity(main_entry.entity_id, device_id, key, is_main=True)
 
             for other_entry in entity_reg.entities.values():
                 if other_entry.device_id != device_id:
@@ -103,7 +103,7 @@ class Publisher:
                 key = await self._publish_entity_discovery(
                     other_entry, device_id, device_name, is_main=False
                 )
-                self._subscribe_state(other_entry.entity_id, device_id, key, is_main=False)
+                await self._start_entity(other_entry.entity_id, device_id, key, is_main=False)
 
     async def async_stop(self) -> None:
         """Unsubscribe all state-change listeners."""
@@ -157,6 +157,19 @@ class Publisher:
             self.hass, availability_topic(self.prefix, device_id), "online", qos=0, retain=False
         )
 
+    async def _start_entity(
+        self, entity_id: str, device_id: str, key: str, is_main: bool
+    ) -> None:
+        """Subscribe to state changes and mirror the current state once.
+
+        Without the initial dump, FHEM readings stay empty until the entity
+        happens to change — for slow-moving stats that can be hours.
+        """
+        self._subscribe_state(entity_id, device_id, key, is_main)
+        state = self.hass.states.get(entity_id)
+        if state is not None:
+            await self._publish_state(entity_id, device_id, key, is_main, state)
+
     def _subscribe_state(
         self, entity_id: str, device_id: str, key: str, is_main: bool
     ) -> None:
@@ -187,9 +200,13 @@ class Publisher:
                     fan_speed=new_state.attributes.get("fan_speed"),
                 )
             except ValueError:
-                _LOGGER.warning(
-                    "ignoring unmappable vacuum state %r for %s", new_state.state, entity_id
+                # unavailable/unknown is the robot being asleep, not a bug
+                log = (
+                    _LOGGER.debug
+                    if new_state.state in ("unavailable", "unknown")
+                    else _LOGGER.warning
                 )
+                log("ignoring unmappable vacuum state %r for %s", new_state.state, entity_id)
                 return
             body = _dumps(payload)
         elif domain == "binary_sensor":

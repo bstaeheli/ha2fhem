@@ -14,7 +14,8 @@ from typing import Callable
 
 from homeassistant.components import mqtt
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+from homeassistant.core import CoreState, HomeAssistant
 
 from .commands import CommandHandler
 from .const import CONF_EXCLUDE_DEVICES, CONF_INCLUDE_DEVICES, CONF_TOPIC_PREFIX, DOMAIN
@@ -46,7 +47,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             await _publish_all()
 
     await mqtt.async_publish(hass, status_topic(prefix), "online", qos=0, retain=False)
-    await _publish_all()
+
+    # At HA boot other integrations (the actual vacuums) aren't ready yet —
+    # publishing then mirrors empty attributes (no supported_features, no
+    # states). Wait for STARTED; on entry reload hass is already running.
+    if hass.state is CoreState.running:
+        await _publish_all()
+    else:
+        async def _on_started(_event) -> None:
+            await _publish_all()
+
+        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _on_started)
+
     await command_handler.async_start()
 
     unsub_status = await mqtt.async_subscribe(hass, "homeassistant/status", _on_ha_status, qos=0)
