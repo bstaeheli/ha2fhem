@@ -101,17 +101,45 @@ def parse_command_topic(prefix: str, topic: str) -> tuple[str, str, str] | None:
 # ---------------------------------------------------------------------------
 
 
-def entity_key(domain: str, object_id: str, is_main: bool) -> str:
-    """Derive the stable entity_key used in topics/unique_id.
+def entity_key(
+    domain: str,
+    object_id: str,
+    is_main: bool,
+    translation_key: str | None = None,
+    device_class: str | None = None,
+    device_name: str | None = None,
+) -> str:
+    """Derive the stable, English entity_key used in topics/unique_id.
 
     For the main (controllable) entity of a device, the entity_key is the
-    component/domain name itself (e.g. ``vacuum``). For any other entity of
-    the device (sensors, binary_sensors, ...), the entity_key is a slugified
-    version of the HA object_id (the part of entity_id after the dot).
+    component/domain name itself (e.g. ``vacuum``). For any other entity,
+    per CONTRACT.md, in order of preference: the entity's ``translation_key``
+    (stable English, e.g. ``bin_full``), else its device class (e.g.
+    ``battery``), else the slugified object_id with a leading device-name
+    prefix stripped. Never the localized friendly name.
     """
     if is_main:
         return domain
-    return _slugify(object_id)
+    # ponytail: no per-device collision dedupe; two entities of one device
+    # sharing a device_class (and lacking translation_key) would share a key.
+    if translation_key:
+        return _slugify(translation_key)
+    if device_class:
+        return _slugify(device_class)
+    key = _slugify(object_id)
+    if device_name:
+        prefix = _slugify(device_name) + "_"
+        if key.startswith(prefix) and len(key) > len(prefix):
+            key = key[len(prefix) :]
+    return key
+
+
+def binary_sensor_payload(state: str) -> str:
+    """Map HA binary_sensor states to the contract's true/false.
+
+    Anything else (``unknown``, ...) passes through unchanged.
+    """
+    return {"on": "true", "off": "false"}.get(state, state)
 
 
 # ---------------------------------------------------------------------------

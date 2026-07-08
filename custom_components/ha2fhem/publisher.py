@@ -19,6 +19,7 @@ from homeassistant.helpers.event import async_track_state_change_event
 
 from .contract import (
     availability_topic,
+    binary_sensor_payload,
     discovery_payload,
     discovery_topic,
     entity_key,
@@ -89,20 +90,20 @@ class Publisher:
                 continue
 
             await self._publish_availability(device_id)
-            await self._publish_entity_discovery(
+            key = await self._publish_entity_discovery(
                 main_entry, device_id, device_name, is_main=True
             )
-            self._subscribe_state(main_entry.entity_id, device_id, is_main=True)
+            self._subscribe_state(main_entry.entity_id, device_id, key, is_main=True)
 
             for other_entry in entity_reg.entities.values():
                 if other_entry.device_id != device_id:
                     continue
                 if other_entry.domain not in SENSOR_DOMAINS:
                     continue
-                await self._publish_entity_discovery(
+                key = await self._publish_entity_discovery(
                     other_entry, device_id, device_name, is_main=False
                 )
-                self._subscribe_state(other_entry.entity_id, device_id, is_main=False)
+                self._subscribe_state(other_entry.entity_id, device_id, key, is_main=False)
 
     async def async_stop(self) -> None:
         """Unsubscribe all state-change listeners."""
@@ -112,9 +113,16 @@ class Publisher:
 
     async def _publish_entity_discovery(
         self, entry: er.RegistryEntry, device_id: str, device_name: str, is_main: bool
-    ) -> None:
+    ) -> str:
         _, object_id = entry.entity_id.split(".", 1)
-        key = entity_key(entry.domain, object_id, is_main)
+        key = entity_key(
+            entry.domain,
+            object_id,
+            is_main,
+            translation_key=entry.translation_key,
+            device_class=entry.device_class or entry.original_device_class,
+            device_name=device_name,
+        )
         entity_name = entry.name or entry.original_name or object_id
 
         extra = None
@@ -142,20 +150,23 @@ class Publisher:
         )
         topic = discovery_topic(self.prefix, entry.domain, device_id, key)
         await mqtt.async_publish(self.hass, topic, _dumps(payload), qos=0, retain=False)
+        return key
 
     async def _publish_availability(self, device_id: str) -> None:
         await mqtt.async_publish(
             self.hass, availability_topic(self.prefix, device_id), "online", qos=0, retain=False
         )
 
-    def _subscribe_state(self, entity_id: str, device_id: str, is_main: bool) -> None:
+    def _subscribe_state(
+        self, entity_id: str, device_id: str, key: str, is_main: bool
+    ) -> None:
         @callback
         def _handle(event: Event) -> None:
             new_state: State | None = event.data.get("new_state")
             if new_state is None:
                 return
             self.hass.async_create_task(
-                self._publish_state(entity_id, device_id, is_main, new_state)
+                self._publish_state(entity_id, device_id, key, is_main, new_state)
             )
 
         self._unsubs.append(
@@ -163,10 +174,9 @@ class Publisher:
         )
 
     async def _publish_state(
-        self, entity_id: str, device_id: str, is_main: bool, new_state: State
+        self, entity_id: str, device_id: str, key: str, is_main: bool, new_state: State
     ) -> None:
-        domain, object_id = entity_id.split(".", 1)
-        key = entity_key(domain, object_id, is_main)
+        domain, _ = entity_id.split(".", 1)
         topic = state_topic(self.prefix, device_id, key)
 
         if is_main and domain == "vacuum":
@@ -182,6 +192,8 @@ class Publisher:
                 )
                 return
             body = _dumps(payload)
+        elif domain == "binary_sensor":
+            body = binary_sensor_payload(new_state.state)
         else:
             body = new_state.state
 

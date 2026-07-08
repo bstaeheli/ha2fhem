@@ -94,6 +94,44 @@ def test_entity_key_non_main_is_slugified_object_id():
     )
 
 
+def test_entity_key_prefers_translation_key():
+    # localized object_id must not leak into the key when HA gives us a
+    # stable English translation_key
+    assert contract.entity_key(
+        "binary_sensor", "eg_behalter_voll", False,
+        translation_key="bin_full", device_class="occupancy", device_name="EG",
+    ) == "bin_full"
+
+
+def test_entity_key_falls_back_to_device_class():
+    assert contract.entity_key(
+        "sensor", "eg_batterie", False,
+        translation_key=None, device_class="battery", device_name="EG",
+    ) == "battery"
+
+
+def test_entity_key_strips_device_name_prefix_from_object_id():
+    assert contract.entity_key(
+        "sensor", "eg_missionen_insgesamt", False, device_name="EG"
+    ) == "missionen_insgesamt"
+    # object_id that IS just the device name keeps its key
+    assert contract.entity_key("sensor", "eg", False, device_name="EG") == "eg"
+    # no device_name -> unchanged
+    assert contract.entity_key("sensor", "eg_batterie", False) == "eg_batterie"
+
+
+def test_entity_key_main_ignores_name_sources():
+    assert contract.entity_key(
+        "vacuum", "eg", True, translation_key="x", device_class="y", device_name="EG"
+    ) == "vacuum"
+
+
+def test_binary_sensor_payload_maps_on_off():
+    assert contract.binary_sensor_payload("on") == "true"
+    assert contract.binary_sensor_payload("off") == "false"
+    assert contract.binary_sensor_payload("unknown") == "unknown"
+
+
 # ---------------------------------------------------------------------------
 # discovery_payload
 # ---------------------------------------------------------------------------
