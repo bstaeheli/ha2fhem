@@ -14,5 +14,18 @@
     "abort": {
       "single_instance_allowed": "ha2fhem is already configured. Only one instance is allowed."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "ha2fhem",
+        "description": "Re-export Home Assistant devices as ha2fhem MQTT discovery for FHEM.",
+        "data": {
+          "topic_prefix": "MQTT topic prefix",
+          "include_devices": "Include devices (comma-separated device ids or names, optional)",
+          "exclude_devices": "Exclude devices (comma-separated device ids or names, optional)"
+        }
+      }
+    }
   }
 }

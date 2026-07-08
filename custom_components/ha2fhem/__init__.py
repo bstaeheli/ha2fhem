@@ -25,13 +25,22 @@ from .publisher import Publisher
 PLATFORMS: list[str] = []
 
 
+async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Options changed: reload the entry to pick up the new config."""
+    await hass.config_entries.async_reload(entry.entry_id)
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up ha2fhem from a config entry."""
     await mqtt.async_wait_for_mqtt_client(hass)
 
-    prefix = entry.data.get(CONF_TOPIC_PREFIX, "ha2fhem")
-    include_devices = entry.data.get(CONF_INCLUDE_DEVICES, "")
-    exclude_devices = entry.data.get(CONF_EXCLUDE_DEVICES, "")
+    prefix = entry.options.get(CONF_TOPIC_PREFIX, entry.data.get(CONF_TOPIC_PREFIX, "ha2fhem"))
+    include_devices = entry.options.get(
+        CONF_INCLUDE_DEVICES, entry.data.get(CONF_INCLUDE_DEVICES, "")
+    )
+    exclude_devices = entry.options.get(
+        CONF_EXCLUDE_DEVICES, entry.data.get(CONF_EXCLUDE_DEVICES, "")
+    )
 
     publisher = Publisher(hass, prefix, include_devices, exclude_devices)
     command_handler = CommandHandler(hass, prefix, include_devices, exclude_devices)
@@ -63,6 +72,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     unsub_status = await mqtt.async_subscribe(hass, "homeassistant/status", _on_ha_status, qos=0)
     unsubs.append(unsub_status)
+
+    # Options flow save -> reload the entry so the new topic_prefix/filters take
+    # effect immediately (publisher republishes discovery on start).
+    # ponytail: reload republishes discovery for devices still in the filter,
+    # but a device newly *excluded* keeps its old discovery entry in FHEM —
+    # nothing ever publishes a delete for it (async_unload_entry only stops
+    # state mirroring, see Publisher.async_stop). Ceiling: manual FHEM-side
+    # cleanup (delete the reading) until a device is re-included or the FHEM
+    # device is removed by hand. Upgrade path: diff old vs. new
+    # include/exclude against the device registry and publish empty discovery
+    # payloads for devices that dropped out — tracked as a follow-up issue.
+    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = {
