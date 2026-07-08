@@ -122,7 +122,10 @@ are given → `vacuum.send_command`.
 
 `supported_features` in the discovery config is a subset of
 `start, stop, pause, return_home, status, locate, clean_spot, fan_speed,
-send_command` and drives which setters the FHEM profile exposes.
+send_command` and drives which setters the FHEM profile exposes. When the
+HA side cannot determine the features yet (entity unavailable, e.g. during
+startup), the key is **omitted** — absent means unknown, and the FHEM side
+exposes all setters rather than none.
 
 ### Additional device entities
 
