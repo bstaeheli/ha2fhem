@@ -14,9 +14,12 @@ import re
 
 VACUUM_STATES = {"cleaning", "docked", "idle", "paused", "returning", "error"}
 
+# CONTRACT.md "Component: cover" > State
+COVER_STATES = {"open", "opening", "closed", "closing", "stopped"}
+
 # Command topic kinds, i.e. the last segment of a command topic
 # (`<prefix>/devices/<device_id>/<entity_key>/<kind>`).
-COMMAND_KINDS = {"set", "set_fan_speed", "send_command"}
+COMMAND_KINDS = {"set", "set_fan_speed", "send_command", "set_position"}
 
 # Plain payloads on the `set` command topic that map 1:1 to a same-named
 # `vacuum.<payload>` service call (CONTRACT.md "Component: vacuum" > Commands).
@@ -222,6 +225,27 @@ def vacuum_state_payload(
 
 
 # ---------------------------------------------------------------------------
+# Cover state payload (CONTRACT.md "Component: cover")
+# ---------------------------------------------------------------------------
+
+
+def cover_state_payload(state: str, position: int | None = None) -> dict:
+    """Build the flat cover state JSON per CONTRACT.md.
+
+    Example: {"state": "open", "position": 75}
+    """
+    if state not in COVER_STATES:
+        raise ValueError(
+            f"invalid cover state {state!r}, must be one of {sorted(COVER_STATES)}"
+        )
+
+    payload: dict = {"state": state}
+    if position is not None:
+        payload["position"] = position
+    return payload
+
+
+# ---------------------------------------------------------------------------
 # Vacuum supported_features (CONTRACT.md "Component: vacuum" > supported_features)
 #
 # Bit values match homeassistant.components.vacuum.VacuumEntityFeature. Kept
@@ -302,20 +326,80 @@ def vacuum_command_topics_extra(
 
 
 # ---------------------------------------------------------------------------
-# Vacuum commands (CONTRACT.md "Component: vacuum" > Commands)
+# Cover supported_features (CONTRACT.md "Component: cover" > supported_features)
+#
+# Bit values match homeassistant.components.cover.CoverEntityFeature. Kept as
+# plain constants here (not imported from homeassistant) so this module stays
+# free of any ``homeassistant`` import.
+# ---------------------------------------------------------------------------
+
+COVER_FEATURE_OPEN = 1
+COVER_FEATURE_CLOSE = 2
+COVER_FEATURE_SET_POSITION = 4
+COVER_FEATURE_STOP = 8
+
+_COVER_FEATURE_BITS = {
+    COVER_FEATURE_OPEN: "open",
+    COVER_FEATURE_CLOSE: "close",
+    COVER_FEATURE_SET_POSITION: "set_position",
+    COVER_FEATURE_STOP: "stop",
+}
+
+
+def cover_features(supported_features: int) -> list[str]:
+    """Decode a HA cover ``supported_features`` bitmask into contract names.
+
+    Returns the sorted, de-duplicated subset of CONTRACT.md's ``open, close,
+    set_position, stop`` that the bitmask sets.
+    """
+    return sorted(
+        {name for bit, name in _COVER_FEATURE_BITS.items() if supported_features & bit}
+    )
+
+
+def cover_command_topics_extra(
+    prefix: str, device_id: str, entity_key: str, supported_features: int
+) -> dict:
+    """Build the discovery ``extra`` fields for the controllable cover entity.
+
+    Adds the two command topics and ``supported_features`` (as contract
+    feature names, CONTRACT.md "Component: cover" > Commands). A bitmask of 0
+    means "unknown" (entity unavailable, e.g. at HA startup) — per CONTRACT.md
+    the key is then omitted so the FHEM side exposes all setters, not none.
+    """
+    extra = {
+        "command_topic": command_topic(prefix, device_id, entity_key, "set"),
+        "set_position_topic": command_topic(prefix, device_id, entity_key, "set_position"),
+    }
+    if supported_features:
+        extra["supported_features"] = cover_features(supported_features)
+    return extra
+
+
+# ---------------------------------------------------------------------------
+# Commands (CONTRACT.md "Component: vacuum" / "Component: cover" > Commands)
 # ---------------------------------------------------------------------------
 
 
-def command_to_service(topic_kind: str, payload: str) -> tuple[str, dict] | None:
+def command_to_service(component: str, topic_kind: str, payload: str) -> tuple[str, dict] | None:
     """Map an incoming command payload to a ``(service, service_data_extra)`` pair.
 
-    ``topic_kind`` is one of :data:`COMMAND_KINDS` (as returned by
+    ``component`` is the HA domain of the main entity (``vacuum`` or
+    ``cover``). ``topic_kind`` is one of :data:`COMMAND_KINDS` (as returned by
     :func:`parse_command_topic`). ``service_data_extra`` never includes
     ``entity_id`` -- the caller adds that from the resolved entity. Returns
     None for anything that doesn't map to a valid service call (unknown
-    payload, empty payload, unknown topic_kind); the caller should log and
-    ignore.
+    payload, empty payload, unknown topic_kind/component combination); the
+    caller should log and ignore.
     """
+    if component == "vacuum":
+        return _vacuum_command_to_service(topic_kind, payload)
+    if component == "cover":
+        return _cover_command_to_service(topic_kind, payload)
+    return None
+
+
+def _vacuum_command_to_service(topic_kind: str, payload: str) -> tuple[str, dict] | None:
     if topic_kind == "set":
         if payload in VACUUM_SIMPLE_COMMANDS:
             return payload, {}
@@ -346,5 +430,31 @@ def command_to_service(topic_kind: str, payload: str) -> tuple[str, dict] | None
             return "send_command", extra
 
         return "send_command", {"command": payload}
+
+    return None
+
+
+# Plain payloads on the `set` command topic that map 1:1 to a cover service
+# call (CONTRACT.md "Component: cover" > Commands).
+COVER_SIMPLE_COMMANDS = {
+    "OPEN": "open_cover",
+    "CLOSE": "close_cover",
+    "STOP": "stop_cover",
+}
+
+
+def _cover_command_to_service(topic_kind: str, payload: str) -> tuple[str, dict] | None:
+    if topic_kind == "set":
+        service = COVER_SIMPLE_COMMANDS.get(payload)
+        return (service, {}) if service else None
+
+    if topic_kind == "set_position":
+        try:
+            position = int(payload)
+        except (TypeError, ValueError):
+            return None
+        if not 0 <= position <= 100:
+            return None
+        return "set_cover_position", {"position": position}
 
     return None

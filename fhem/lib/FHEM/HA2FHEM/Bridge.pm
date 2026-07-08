@@ -80,7 +80,7 @@ sub _setupIO {
     my $prefix = ::AttrVal($name, 'topicPrefix', 'ha2fhem');
     if (::AttrVal($ioName, 'ignoreRegexp', '') !~ /\Q$prefix\E/) {
         ::Log3($name, 2, "$name: recommend echo guard on $ioName: "
-             . "attr $ioName ignoreRegexp ^$prefix/devices/[^/]+/[^/]+/(set|set_fan_speed|send_command):");
+             . "attr $ioName ignoreRegexp ^$prefix/devices/[^/]+/[^/]+/(set|set_fan_speed|send_command|set_position):");
     }
 
     ::readingsSingleUpdate($hash, 'state', 'active', 1);

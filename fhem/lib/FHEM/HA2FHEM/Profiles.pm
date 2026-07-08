@@ -15,19 +15,33 @@ our %PROFILES = (
         # per CONTRACT.md, vacuum.mqtt state schema
         state_keys => [qw(state battery_level fan_speed docked charging error)],
     },
+    cover => {
+        # per CONTRACT.md, Component: cover > State
+        state_keys => [qw(state position)],
+    },
 );
 
-# vacuum set commands: FHEM set name => { feature, payload }.
-# feature is the HA supported_features entry gating the setter; dock is an
-# alias for return_to_base (same feature, same topic, same payload).
-our %VACUUM_COMMANDS = (
-    start          => { feature => 'start',       payload => 'start' },
-    stop           => { feature => 'stop',        payload => 'stop' },
-    pause          => { feature => 'pause',       payload => 'pause' },
-    return_to_base => { feature => 'return_home', payload => 'return_to_base' },
-    dock           => { feature => 'return_home', payload => 'return_to_base' },
-    locate         => { feature => 'locate',      payload => 'locate' },
-    clean_spot     => { feature => 'clean_spot',  payload => 'clean_spot' },
+# Per-component set commands on the `set` topic: FHEM set name => { feature,
+# payload }. feature is the HA supported_features entry gating the setter;
+# dock is an alias for return_to_base (same feature, same topic, same
+# payload). Setters with their own topic and/or a dynamically-built widget
+# (fan_speed/send_command for vacuum, pct for cover) stay out of this table
+# and are handled separately below.
+our %COMMANDS = (
+    vacuum => {
+        start          => { feature => 'start',       payload => 'start' },
+        stop           => { feature => 'stop',        payload => 'stop' },
+        pause          => { feature => 'pause',       payload => 'pause' },
+        return_to_base => { feature => 'return_home', payload => 'return_to_base' },
+        dock           => { feature => 'return_home', payload => 'return_to_base' },
+        locate         => { feature => 'locate',      payload => 'locate' },
+        clean_spot     => { feature => 'clean_spot',  payload => 'clean_spot' },
+    },
+    cover => {
+        open  => { feature => 'open',  payload => 'OPEN' },
+        close => { feature => 'close', payload => 'CLOSE' },
+        stop  => { feature => 'stop',  payload => 'STOP' },
+    },
 );
 
 sub known_profile { return exists $PROFILES{ $_[0] } }
@@ -40,12 +54,13 @@ sub is_main_component {
 # set_commands($component, $entity) -> hashref of FHEM set name => spec.
 # spec is { topic, payload } for fixed-payload commands, or
 # { topic, arg => 1 [, widget] } where the payload is the user's set argument
-# (fan_speed gets a widget => "min,medium,..." set-list suffix).
+# (fan_speed/pct get a widget suffix).
 # Gated on discovery config supported_features (array of HA feature names);
-# missing/absent supported_features exposes everything. Non-vacuum -> {}.
+# missing/absent supported_features exposes everything. Unknown component -> {}.
 sub set_commands {
     my ($component, $entity) = @_;
-    return {} if $component ne 'vacuum';
+    my $table = $COMMANDS{$component};
+    return {} if !$table;
 
     my $config   = $entity->{config} // {};
     my $features = $config->{supported_features};
@@ -56,8 +71,8 @@ sub set_commands {
     $base =~ s{/state$}{};
 
     my %set;
-    for my $name (keys %VACUUM_COMMANDS) {
-        my $cmd = $VACUUM_COMMANDS{$name};
+    for my $name (keys %$table) {
+        my $cmd = $table->{$name};
         next if $gate && !$has{ $cmd->{feature} };
         $set{$name} = {
             topic   => $config->{command_topic} // "$base/set",
@@ -65,20 +80,30 @@ sub set_commands {
         };
     }
 
-    if (!$gate || $has{fan_speed}) {
-        my $list = $config->{fan_speed_list};
-        $list = [qw(min medium high max)] if ref $list ne 'ARRAY' || !@$list;
-        $set{fan_speed} = {
-            topic  => $config->{set_fan_speed_topic} // "$base/set_fan_speed",
-            arg    => 1,
-            widget => join(',', @$list),
-        };
+    if ($component eq 'vacuum') {
+        if (!$gate || $has{fan_speed}) {
+            my $list = $config->{fan_speed_list};
+            $list = [qw(min medium high max)] if ref $list ne 'ARRAY' || !@$list;
+            $set{fan_speed} = {
+                topic  => $config->{set_fan_speed_topic} // "$base/set_fan_speed",
+                arg    => 1,
+                widget => join(',', @$list),
+            };
+        }
+
+        if (!$gate || $has{send_command}) {
+            $set{send_command} = {
+                topic => $config->{send_command_topic} // "$base/send_command",
+                arg   => 1,
+            };
+        }
     }
 
-    if (!$gate || $has{send_command}) {
-        $set{send_command} = {
-            topic => $config->{send_command_topic} // "$base/send_command",
-            arg   => 1,
+    if ($component eq 'cover' && (!$gate || $has{set_position})) {
+        $set{pct} = {
+            topic  => $config->{set_position_topic} // "$base/set_position",
+            arg    => 1,
+            widget => 'slider,0,1,100',
         };
     }
 

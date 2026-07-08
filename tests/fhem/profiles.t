@@ -7,7 +7,9 @@ use FHEM::HA2FHEM::Profiles;
 *sr = \&FHEM::HA2FHEM::Profiles::state_readings;
 
 ok(FHEM::HA2FHEM::Profiles::known_profile('vacuum'), 'vacuum profile exists');
+ok(FHEM::HA2FHEM::Profiles::known_profile('cover'), 'cover profile exists');
 ok(FHEM::HA2FHEM::Profiles::is_main_component('vacuum'), 'vacuum is main');
+ok(FHEM::HA2FHEM::Profiles::is_main_component('cover'), 'cover is main');
 ok(!FHEM::HA2FHEM::Profiles::is_main_component('sensor'), 'sensor is not');
 
 # CONTRACT.md example payload, main entity

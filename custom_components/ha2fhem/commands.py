@@ -1,11 +1,11 @@
-"""Command topics → vacuum service calls.
+"""Command topics → main-entity service calls.
 
-Subscribes to the three vacuum command topic patterns under the configured
-prefix (``set``, ``set_fan_speed``, ``send_command``), resolves the incoming
-``(device_id, entity_key)`` against the entity registry the same way
-publisher.py does, and calls the matching ``vacuum.*`` service. All
-topic/payload parsing goes through contract.py so it stays byte-for-byte
-aligned with CONTRACT.md.
+Subscribes to the command topic patterns under the configured prefix
+(``set``, ``set_fan_speed``, ``send_command``, ``set_position``), resolves
+the incoming ``(device_id, entity_key)`` against the entity registry the same
+way publisher.py does, and calls the matching service on the main entity's
+own domain (vacuum.*, cover.*). All topic/payload parsing goes through
+contract.py so it stays byte-for-byte aligned with CONTRACT.md.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class CommandHandler:
-    """Subscribes to command topics and dispatches vacuum service calls."""
+    """Subscribes to command topics and dispatches main-entity service calls."""
 
     def __init__(
         self, hass: HomeAssistant, prefix: str, include_devices: str, exclude_devices: str
@@ -56,7 +56,10 @@ class CommandHandler:
             return
         device_id, entity_key, kind = parsed
 
-        result = command_to_service(kind, msg.payload)
+        # The main entity's entity_key is always its domain (contract.entity_key),
+        # and only main entities have command topics, so entity_key doubles as
+        # the component/service-domain here.
+        result = command_to_service(entity_key, kind, msg.payload)
         if result is None:
             _LOGGER.warning(
                 "ignoring invalid %s payload %r on %s", kind, msg.payload, msg.topic
@@ -67,7 +70,8 @@ class CommandHandler:
         entity_id = self._resolve_entity_id(device_id, entity_key)
         if entity_id is None:
             _LOGGER.warning(
-                "no vacuum entity for device_id=%s entity_key=%s (topic %s)",
+                "no %s entity for device_id=%s entity_key=%s (topic %s)",
+                entity_key,
                 device_id,
                 entity_key,
                 msg.topic,
@@ -75,15 +79,15 @@ class CommandHandler:
             return
 
         await self.hass.services.async_call(
-            "vacuum", service, {"entity_id": entity_id, **extra}, blocking=False
+            entity_key, service, {"entity_id": entity_id, **extra}, blocking=False
         )
 
     def _resolve_entity_id(self, device_id: str, entity_key: str) -> str | None:
-        """Mirror publisher.py's registry walk to find the vacuum entity_id.
+        """Mirror publisher.py's registry walk to find the main entity_id.
 
         The main (controllable) entity's entity_key is always its domain
-        (see contract.entity_key), so for the vacuum component that's the
-        fixed string "vacuum".
+        (see contract.entity_key), so entity_key doubles as the domain to
+        match against (e.g. "vacuum", "cover").
         """
         entity_reg = er.async_get(self.hass)
         device_reg = dr.async_get(self.hass)

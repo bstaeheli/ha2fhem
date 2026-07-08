@@ -316,30 +316,30 @@ def test_parse_command_topic_rejects_non_command_topics(topic):
     "payload", ["start", "stop", "pause", "return_to_base", "locate", "clean_spot"]
 )
 def test_command_to_service_simple_commands(payload):
-    assert contract.command_to_service("set", payload) == (payload, {})
+    assert contract.command_to_service("vacuum", "set", payload) == (payload, {})
 
 
 def test_command_to_service_unknown_set_payload_is_none():
-    assert contract.command_to_service("set", "bogus") is None
+    assert contract.command_to_service("vacuum", "set", "bogus") is None
 
 
 def test_command_to_service_empty_set_payload_is_none():
-    assert contract.command_to_service("set", "") is None
+    assert contract.command_to_service("vacuum", "set", "") is None
 
 
 def test_command_to_service_fan_speed():
-    assert contract.command_to_service("set_fan_speed", "max") == (
+    assert contract.command_to_service("vacuum", "set_fan_speed", "max") == (
         "set_fan_speed",
         {"fan_speed": "max"},
     )
 
 
 def test_command_to_service_fan_speed_empty_payload_is_none():
-    assert contract.command_to_service("set_fan_speed", "") is None
+    assert contract.command_to_service("vacuum", "set_fan_speed", "") is None
 
 
 def test_command_to_service_send_command_plain_string():
-    assert contract.command_to_service("send_command", "clean_room") == (
+    assert contract.command_to_service("vacuum", "send_command", "clean_room") == (
         "send_command",
         {"command": "clean_room"},
     )
@@ -347,7 +347,7 @@ def test_command_to_service_send_command_plain_string():
 
 def test_command_to_service_send_command_json_with_params():
     payload = '{"command": "go_to", "x": 1, "y": 2}'
-    assert contract.command_to_service("send_command", payload) == (
+    assert contract.command_to_service("vacuum", "send_command", payload) == (
         "send_command",
         {"command": "go_to", "params": {"x": 1, "y": 2}},
     )
@@ -355,22 +355,22 @@ def test_command_to_service_send_command_json_with_params():
 
 def test_command_to_service_send_command_json_without_extra_params():
     payload = '{"command": "clean_room"}'
-    assert contract.command_to_service("send_command", payload) == (
+    assert contract.command_to_service("vacuum", "send_command", payload) == (
         "send_command",
         {"command": "clean_room"},
     )
 
 
 def test_command_to_service_send_command_json_missing_command_is_none():
-    assert contract.command_to_service("send_command", '{"x": 1}') is None
+    assert contract.command_to_service("vacuum", "send_command", '{"x": 1}') is None
 
 
 def test_command_to_service_send_command_empty_payload_is_none():
-    assert contract.command_to_service("send_command", "") is None
+    assert contract.command_to_service("vacuum", "send_command", "") is None
 
 
 def test_command_to_service_unknown_topic_kind_is_none():
-    assert contract.command_to_service("bogus_kind", "start") is None
+    assert contract.command_to_service("vacuum", "bogus_kind", "start") is None
 
 
 # ---------------------------------------------------------------------------
@@ -532,3 +532,177 @@ def test_discovery_payload_sibling_sensor_has_no_command_topics():
     assert "send_command_topic" not in payload
     assert "supported_features" not in payload
     assert "fan_speed_list" not in payload
+
+
+# ---------------------------------------------------------------------------
+# cover_state_payload — cross-checked against the CONTRACT.md example:
+# {"state": "open", "position": 75}
+# ---------------------------------------------------------------------------
+
+
+def test_cover_state_payload_contract_example():
+    payload = contract.cover_state_payload(state="open", position=75)
+    assert payload == {"state": "open", "position": 75}
+
+
+def test_cover_state_payload_omits_none_position():
+    payload = contract.cover_state_payload(state="closed")
+    assert payload == {"state": "closed"}
+    assert "position" not in payload
+
+
+@pytest.mark.parametrize(
+    "state", ["open", "opening", "closed", "closing", "stopped"]
+)
+def test_cover_state_payload_accepts_all_contract_states(state):
+    payload = contract.cover_state_payload(state=state)
+    assert payload["state"] == state
+
+
+def test_cover_state_payload_rejects_invalid_state():
+    with pytest.raises(ValueError, match="invalid cover state"):
+        contract.cover_state_payload(state="ajar")
+
+
+def test_cover_state_payload_rejects_empty_state():
+    with pytest.raises(ValueError):
+        contract.cover_state_payload(state="")
+
+
+def test_cover_state_payload_position_zero_is_not_omitted():
+    # position=0 must survive: "not None" is the omission test, not truthiness
+    payload = contract.cover_state_payload(state="closed", position=0)
+    assert payload == {"state": "closed", "position": 0}
+
+
+# ---------------------------------------------------------------------------
+# cover_features — bitmask -> contract feature names
+# (homeassistant.components.cover.CoverEntityFeature bit values)
+# ---------------------------------------------------------------------------
+
+
+def test_cover_features_zero_is_empty():
+    assert contract.cover_features(0) == []
+
+
+def test_cover_features_full_mask_has_everything():
+    full_mask = (
+        contract.COVER_FEATURE_OPEN
+        | contract.COVER_FEATURE_CLOSE
+        | contract.COVER_FEATURE_SET_POSITION
+        | contract.COVER_FEATURE_STOP
+    )
+    assert contract.cover_features(full_mask) == ["close", "open", "set_position", "stop"]
+
+
+def test_cover_features_partial_mask():
+    mask = contract.COVER_FEATURE_OPEN | contract.COVER_FEATURE_CLOSE
+    assert contract.cover_features(mask) == ["close", "open"]
+    assert "stop" not in contract.cover_features(mask)
+    assert "set_position" not in contract.cover_features(mask)
+
+
+# ---------------------------------------------------------------------------
+# cover_command_topics_extra
+# ---------------------------------------------------------------------------
+
+
+def test_cover_command_topics_extra_includes_command_topics():
+    full_mask = (
+        contract.COVER_FEATURE_OPEN
+        | contract.COVER_FEATURE_CLOSE
+        | contract.COVER_FEATURE_STOP
+    )
+    extra = contract.cover_command_topics_extra(PREFIX, "blind1", "cover", full_mask)
+    assert extra["command_topic"] == "ha2fhem/devices/blind1/cover/set"
+    assert extra["set_position_topic"] == "ha2fhem/devices/blind1/cover/set_position"
+    assert extra["supported_features"] == ["close", "open", "stop"]
+
+
+def test_cover_command_topics_extra_zero_features_omits_key():
+    # 0 = unknown (entity unavailable at startup) -> key omitted per
+    # CONTRACT.md, FHEM then exposes all setters instead of none
+    extra = contract.cover_command_topics_extra(PREFIX, "blind1", "cover", 0)
+    assert "supported_features" not in extra
+    assert extra["command_topic"] == f"{PREFIX}/devices/blind1/cover/set"
+    assert extra["set_position_topic"] == f"{PREFIX}/devices/blind1/cover/set_position"
+
+
+def test_cover_command_topics_extra_merges_into_discovery_payload_via_extra():
+    extra = {"schema": "state"}
+    extra.update(
+        contract.cover_command_topics_extra(
+            PREFIX, "blind1", "cover", contract.COVER_FEATURE_SET_POSITION
+        )
+    )
+    payload = contract.discovery_payload(
+        PREFIX, "cover", "blind1", "cover", "Blind", "Blind", extra=extra
+    )
+    assert payload["command_topic"] == "ha2fhem/devices/blind1/cover/set"
+    assert payload["set_position_topic"] == "ha2fhem/devices/blind1/cover/set_position"
+    assert payload["supported_features"] == ["set_position"]
+    assert payload["unique_id"] == "ha2fhem_blind1_cover"
+
+
+# ---------------------------------------------------------------------------
+# parse_command_topic — set_position kind
+# ---------------------------------------------------------------------------
+
+
+def test_parse_command_topic_set_position():
+    topic = "ha2fhem/devices/blind1/cover/set_position"
+    assert contract.parse_command_topic(PREFIX, topic) == ("blind1", "cover", "set_position")
+
+
+# ---------------------------------------------------------------------------
+# command_to_service — cover mappings
+# ---------------------------------------------------------------------------
+
+
+def test_command_to_service_cover_open():
+    assert contract.command_to_service("cover", "set", "OPEN") == ("open_cover", {})
+
+
+def test_command_to_service_cover_close():
+    assert contract.command_to_service("cover", "set", "CLOSE") == ("close_cover", {})
+
+
+def test_command_to_service_cover_stop():
+    assert contract.command_to_service("cover", "set", "STOP") == ("stop_cover", {})
+
+
+def test_command_to_service_cover_unknown_set_payload_is_none():
+    assert contract.command_to_service("cover", "set", "bogus") is None
+
+
+def test_command_to_service_cover_lowercase_payload_is_none():
+    # CONTRACT.md mandates the HA MQTT cover platform's uppercase payloads
+    assert contract.command_to_service("cover", "set", "open") is None
+
+
+def test_command_to_service_cover_set_position():
+    assert contract.command_to_service("cover", "set_position", "42") == (
+        "set_cover_position",
+        {"position": 42},
+    )
+
+
+@pytest.mark.parametrize("payload", ["0", "100"])
+def test_command_to_service_cover_set_position_boundaries(payload):
+    assert contract.command_to_service("cover", "set_position", payload) == (
+        "set_cover_position",
+        {"position": int(payload)},
+    )
+
+
+@pytest.mark.parametrize("payload", ["-1", "101", "abc", "", "50.5"])
+def test_command_to_service_cover_set_position_rejects_out_of_range_or_non_integer(payload):
+    assert contract.command_to_service("cover", "set_position", payload) is None
+
+
+def test_command_to_service_cover_unknown_topic_kind_is_none():
+    assert contract.command_to_service("cover", "send_command", "start") is None
+
+
+def test_command_to_service_unknown_component_is_none():
+    assert contract.command_to_service("switch", "set", "ON") is None

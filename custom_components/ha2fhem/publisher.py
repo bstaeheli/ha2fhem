@@ -20,6 +20,8 @@ from homeassistant.helpers.event import async_track_state_change_event
 from .contract import (
     availability_topic,
     binary_sensor_payload,
+    cover_command_topics_extra,
+    cover_state_payload,
     discovery_payload,
     discovery_topic,
     entity_key,
@@ -31,7 +33,7 @@ from .contract import (
 _LOGGER = logging.getLogger(__name__)
 
 SENSOR_DOMAINS = ("sensor", "binary_sensor")
-MAIN_DOMAINS = ("vacuum",)
+MAIN_DOMAINS = ("vacuum", "cover")
 
 
 def _matches_filter(value: str, filter_str: str) -> bool:
@@ -68,13 +70,13 @@ class Publisher:
         device_reg = dr.async_get(self.hass)
         entity_reg = er.async_get(self.hass)
 
-        vacuum_entities = [
+        main_entities = [
             entry
             for entry in entity_reg.entities.values()
             if entry.domain in MAIN_DOMAINS
         ]
 
-        for main_entry in vacuum_entities:
+        for main_entry in main_entities:
             if main_entry.device_id is None:
                 continue
             device = device_reg.async_get(main_entry.device_id)
@@ -136,6 +138,15 @@ class Publisher:
                 extra.update(
                     vacuum_command_topics_extra(
                         self.prefix, device_id, key, supported_features, fan_speed_list
+                    )
+                )
+            elif entry.domain == "cover":
+                state = self.hass.states.get(entry.entity_id)
+                attributes = state.attributes if state is not None else {}
+                supported_features = attributes.get("supported_features") or 0
+                extra.update(
+                    cover_command_topics_extra(
+                        self.prefix, device_id, key, supported_features
                     )
                 )
 
@@ -207,6 +218,22 @@ class Publisher:
                     else _LOGGER.warning
                 )
                 log("ignoring unmappable vacuum state %r for %s", new_state.state, entity_id)
+                return
+            body = _dumps(payload)
+        elif is_main and domain == "cover":
+            try:
+                payload = cover_state_payload(
+                    state=new_state.state,
+                    position=new_state.attributes.get("current_cover_position"),
+                )
+            except ValueError:
+                # unavailable/unknown is the cover being asleep, not a bug
+                log = (
+                    _LOGGER.debug
+                    if new_state.state in ("unavailable", "unknown")
+                    else _LOGGER.warning
+                )
+                log("ignoring unmappable cover state %r for %s", new_state.state, entity_id)
                 return
             body = _dumps(payload)
         elif domain == "binary_sensor":
