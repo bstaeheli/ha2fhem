@@ -17,6 +17,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_track_state_change_event
 
+from .const import DOMAIN
 from .contract import (
     availability_topic,
     binary_sensor_payload,
@@ -68,9 +69,16 @@ class Publisher:
         self.include_devices = include_devices
         self.exclude_devices = exclude_devices
         self._unsubs: list[Callable[[], None]] = []
+        # (component, device_id, entity_key) for every discovery config topic
+        # published by the run in progress/just completed. Diffed against the
+        # previous run's set (persisted in hass.data, see _publish_dropped) so
+        # a device/entity that fell out of the filter or the entity registry
+        # gets an empty-payload discovery delete instead of lingering in FHEM.
+        self._published: set[tuple[str, str, str]] = set()
 
     async def async_start(self) -> None:
         """Publish discovery + availability for all selected devices, start mirroring."""
+        self._published = set()
         device_reg = dr.async_get(self.hass)
         entity_reg = er.async_get(self.hass)
 
@@ -111,11 +119,36 @@ class Publisher:
                 )
                 await self._start_entity(other_entry.entity_id, device_id, key, is_main=False)
 
+        await self._publish_dropped()
+
     async def async_stop(self) -> None:
         """Unsubscribe all state-change listeners."""
         for unsub in self._unsubs:
             unsub()
         self._unsubs.clear()
+
+    async def _publish_dropped(self) -> None:
+        """Publish an empty discovery payload for anything the last run had but this one doesn't.
+
+        The Publisher is recreated on every config entry reload (options
+        change), so the previous run's set is kept in hass.data, independent
+        of any one Publisher instance/entry_id -- see #23. Covers both a
+        device/entity falling out of the include/exclude filter and one
+        disappearing from the entity registry (#15's removal half).
+        """
+        store = self.hass.data.setdefault(DOMAIN, {})
+        previous: set[tuple[str, str, str]] = store.get("published", set())
+        # ponytail: keyed by (component, device_id, entity_key), not the full
+        # topic, so a topic_prefix change between runs won't clean up the old
+        # prefix's topics -- acceptable, prefix changes are rare/manual.
+        dropped = previous - self._published
+        for component, device_id, key in dropped:
+            topic = discovery_topic(self.prefix, component, device_id, key)
+            await mqtt.async_publish(self.hass, topic, "", qos=0, retain=False)
+            _LOGGER.info(
+                "publishing discovery delete for %s (dropped from filter/registry)", topic
+            )
+        store["published"] = set(self._published)
 
     async def _publish_entity_discovery(
         self, entry: er.RegistryEntry, device_id: str, device_name: str, is_main: bool
@@ -169,6 +202,7 @@ class Publisher:
         )
         topic = discovery_topic(self.prefix, entry.domain, device_id, key)
         await mqtt.async_publish(self.hass, topic, _dumps(payload), qos=0, retain=False)
+        self._published.add((entry.domain, device_id, key))
         return key
 
     async def _publish_availability(self, device_id: str) -> None:

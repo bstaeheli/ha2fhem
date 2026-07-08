@@ -15,14 +15,26 @@ from typing import Callable
 from homeassistant.components import mqtt
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
-from homeassistant.core import CoreState, HomeAssistant
+from homeassistant.core import CoreState, Event, HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.event import async_call_later
 
 from .commands import CommandHandler
 from .const import CONF_EXCLUDE_DEVICES, CONF_INCLUDE_DEVICES, CONF_TOPIC_PREFIX, DOMAIN
 from .contract import status_topic
-from .publisher import Publisher
+from .publisher import MAIN_DOMAINS, SENSOR_DOMAINS, Publisher
 
 PLATFORMS: list[str] = []
+
+# Domains the publisher actually walks/tracks; anything else changing in the
+# entity registry can't affect what we publish, so it's not worth a resync.
+_RELEVANT_DOMAINS = MAIN_DOMAINS + SENSOR_DOMAINS
+
+# ponytail: fixed debounce instead of smarter batching/coalescing -- HA fires
+# one entity_registry_updated event per entity, so adding/removing a device
+# with several entities means several events; this just waits for the burst
+# to go quiet before resyncing once.
+_RESYNC_DEBOUNCE_SECONDS = 5
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
@@ -73,16 +85,51 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unsub_status = await mqtt.async_subscribe(hass, "homeassistant/status", _on_ha_status, qos=0)
     unsubs.append(unsub_status)
 
-    # Options flow save -> reload the entry so the new topic_prefix/filters take
-    # effect immediately (publisher republishes discovery on start).
-    # ponytail: reload republishes discovery for devices still in the filter,
-    # but a device newly *excluded* keeps its old discovery entry in FHEM —
-    # nothing ever publishes a delete for it (async_unload_entry only stops
-    # state mirroring, see Publisher.async_stop). Ceiling: manual FHEM-side
-    # cleanup (delete the reading) until a device is re-included or the FHEM
-    # device is removed by hand. Upgrade path: diff old vs. new
-    # include/exclude against the device registry and publish empty discovery
-    # payloads for devices that dropped out — tracked as a follow-up issue.
+    # Runtime device/entity add or remove (#15): re-run the publisher's full
+    # sync, which both publishes discovery for anything new and (via
+    # Publisher._publish_dropped, #23) sends an empty discovery payload for
+    # anything that disappeared. entity_registry_updated is what actually
+    # fires per added/removed entity; device_registry_updated does not carry
+    # enough to know which discovery topics are affected, and the publisher
+    # walks the entity registry anyway. One entity registry event per entity
+    # means adding/removing a multi-entity device fires several events in a
+    # burst, hence the debounce.
+    _debounce_cancel: list[Callable[[], None] | None] = [None]
+
+    def _cancel_pending_resync() -> None:
+        if _debounce_cancel[0] is not None:
+            _debounce_cancel[0]()
+            _debounce_cancel[0] = None
+
+    @callback
+    def _on_entity_registry_updated(event: Event) -> None:
+        # Registry loads while HA is still starting up shouldn't trigger a
+        # publish; _on_started (or the CoreState.running branch above)
+        # already covers the initial sync once HA is actually ready.
+        if hass.state is not CoreState.running:
+            return
+        if event.data.get("action") not in ("create", "remove"):
+            return
+        entity_id = event.data.get("entity_id") or ""
+        if entity_id.split(".", 1)[0] not in _RELEVANT_DOMAINS:
+            return
+
+        _cancel_pending_resync()
+
+        @callback
+        def _fire(_now) -> None:
+            _debounce_cancel[0] = None
+            hass.async_create_task(_publish_all())
+
+        _debounce_cancel[0] = async_call_later(hass, _RESYNC_DEBOUNCE_SECONDS, _fire)
+
+    unsubs.append(hass.bus.async_listen(er.EVENT_ENTITY_REGISTRY_UPDATED, _on_entity_registry_updated))
+    unsubs.append(_cancel_pending_resync)
+
+    # Options flow save -> reload the entry so the new topic_prefix/filters
+    # take effect immediately; the publisher republishes discovery for
+    # devices still in the filter and (#23, Publisher._publish_dropped)
+    # sends an empty discovery payload for devices/entities that dropped out.
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
     hass.data.setdefault(DOMAIN, {})
