@@ -24,8 +24,13 @@ ha2fhem/devices/<device_id>/availability          -> "online" / "offline" per de
   `sensor`, `binary_sensor`, ...).
 - `<device_id>`: stable, deterministic identifier derived from the HA device
   registry `device_id`.
-- `<entity_key>`: stable key for the entity within the device, derived from the
-  HA `entity_id` (e.g. `vacuum`, `battery`, `bin_full`).
+- `<entity_key>`: stable, English key for the entity within the device
+  (e.g. `vacuum`, `battery`, `bin_full`). For the main (controllable) entity
+  it is the component name itself. For all other entities it is derived, in
+  order of preference: the entity's `translation_key`, else its device class,
+  else the `entity_id` object part with a leading device-name prefix stripped.
+  Never the localized friendly name — entity keys (and thus FHEM reading
+  names) must not change with the HA UI language.
 - `<object_id>`: `<device_id>_<entity_key>`.
 
 ## Hard rules
@@ -125,6 +130,10 @@ Sensors of the same HA device (Battery, Bin full, mission stats, cleaning
 time, cleaned area m², ...) each publish on their own state topic
 `ha2fhem/devices/<device_id>/<entity_key>/state` (plain value or flat JSON)
 and appear as readings on the same FHEM child.
+
+`binary_sensor` states are published as `true` / `false` (HA's `on` / `off`
+mapped by the HA side); any other state (`unknown`, ...) passes through
+unchanged.
 
 ## Example payloads
 
