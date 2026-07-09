@@ -16,6 +16,24 @@ First supported device class: `vacuum` (iRobot Roomba via the HA `roomba` integr
 
 Early development. The roadmap lives in the [issues and milestones](https://codeberg.org/bstaeheli/ha2fhem/issues) — start with the pinned roadmap issue.
 
+## Coexistence with MQTT2_DEVICE
+
+Many FHEM installations already bind their zigbee2mqtt/Tasmota devices as
+`MQTT2_DEVICE`. Rules of the road:
+
+- **Default is safe.** Out of the box the bridge only touches its own
+  `ha2fhem/#` namespace — existing `MQTT2_DEVICE` setups are unaffected, no
+  matter what else is on the broker.
+- **Generic discovery is opt-in** (`attr <bridge> genericDiscoveryPrefix
+  homeassistant`) and even then the bridge only *claims* messages of devices
+  that pass its `includeDevices`/`excludeDevices` filter; everything else
+  stays visible to `MQTT2_DEVICE` and friends. Shared availability topics
+  (e.g. `zigbee2mqtt/bridge/state`) are never claimed exclusively.
+- **One device, one world.** The bridge sits before `MQTT2_DEVICE` in
+  `clientOrder`, so a device bound in *both* worlds would starve its
+  `MQTT2_DEVICE` of state messages. When migrating a device to ha2fhem,
+  retire its `MQTT2_DEVICE` (or exclude the device from the bridge).
+
 ## Why not existing tools?
 
 - FHEM's `MQTT2_DEVICE` + autocreate deliberately does not parse HA discovery JSON; the FHEM MQTT ecosystem relies on hand-made `attrTemplate`s instead.

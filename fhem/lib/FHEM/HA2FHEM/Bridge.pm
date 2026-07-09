@@ -142,14 +142,26 @@ sub Parse {
             # own command topics (.../set etc.) are ignored here on purpose
         }
         # genericDiscoveryPrefix is empty (feature off) by default: the
-        # bridge must never take over z2m/Tasmota devices silently.
+        # bridge must never take over z2m/Tasmota devices silently. Even when
+        # on, only claim ($consumed) what actually became ours — the bridge
+        # sits before MQTT2_DEVICE in clientOrder, and consuming a foreign
+        # message starves whatever module owns that device.
         elsif ($gprefix ne '' && $topic =~ m{^\Q$gprefix\E/[^/]+/(?:[^/]+/)?[^/]+/config$}) {
-            $consumed = 1;
-            push @found, _handleGenericDiscovery($bridge, $gprefix, $topic, $value);
+            my ($claimed, @names) = _handleGenericDiscovery($bridge, $gprefix, $topic, $value);
+            if ($claimed) {
+                $consumed = 1;
+                push @found, @names;
+            }
         }
         elsif ($gprefix ne '' && $bridge->{topics}{$topic}) {
-            $consumed = 1;
-            push @found, _handleGenericTopic($bridge, $topic, $value);
+            # availability topics are typically shared installation-wide
+            # (zigbee2mqtt/bridge/state) — process them but leave dispatch
+            # open; only device state topics are claimed exclusively.
+            my ($claimed, @names) = _handleGenericTopic($bridge, $topic, $value);
+            if ($claimed) {
+                $consumed = 1;
+                push @found, @names;
+            }
         }
     }
 
@@ -184,6 +196,8 @@ sub _handleDiscoveryDelete {
 }
 
 # genericDiscoveryPrefix topics: <gprefix>/<component>/[<node_id>/]<object_id>/config
+# Returns ($claimed, @child_names): $claimed=0 means "not ours" — the caller
+# must leave the message unconsumed so MQTT2_DEVICE & friends still see it.
 sub _handleGenericDiscovery {
     my ($bridge, $gprefix, $topic, $value) = @_;
     my $bname = $bridge->{NAME};
@@ -195,28 +209,31 @@ sub _handleGenericDiscovery {
     my ($entity, $err) =
         FHEM::HA2FHEM::Discovery::Generic::parse_config($gprefix, $topic, $value);
     if (!$entity) {
-        ::Log3($bname, 2, "$bname: $err");
-        return ();
+        # foreign/broken configs are not our error — log quietly, don't claim
+        ::Log3($bname, 4, "$bname: $err");
+        return (0);
     }
 
     # ponytail: stage 1 (#17) covers switch/light/cover as main entities,
     # plus sensor/binary_sensor attaching to them like our own discovery.
-    # vacuum and everything else are stage 2 (#20).
+    # vacuum and everything else are stage 2 (#24).
     my $component = $entity->{component};
     if ($component ne 'sensor' && $component ne 'binary_sensor'
         && !($component eq 'switch' || $component eq 'light' || $component eq 'cover')) {
         ::Log3($bname, 4, "$bname: generic component $component not yet "
              . "supported (stage 1: switch/light/cover), ignored");
-        return ();
+        return (0);
     }
 
     my @found = _registerEntity($bridge, $entity);
     # index topics only for entities that survived the device filter —
     # otherwise every foreign z2m/Tasmota device would leak into the index
-    _registerGenericTopics($bridge, $entity)
-        if $bridge->{devices}{ $entity->{device_id} }
-        && $bridge->{devices}{ $entity->{device_id} }{entities}{ $entity->{entity_key} };
-    return @found;
+    if ($bridge->{devices}{ $entity->{device_id} }
+        && $bridge->{devices}{ $entity->{device_id} }{entities}{ $entity->{entity_key} }) {
+        _registerGenericTopics($bridge, $entity);
+        return (1, @found);
+    }
+    return (0);    # filtered out -> not ours
 }
 
 sub _handleGenericDiscoveryDelete {
@@ -224,8 +241,18 @@ sub _handleGenericDiscoveryDelete {
 
     my (undef, $object_id) =
         FHEM::HA2FHEM::Discovery::Generic::parse_delete_topic($gprefix, $topic);
-    return () if !$object_id;
-    return _removeEntityByObjectId($bridge, $object_id);
+    return (0) if !$object_id || !_ownsObjectId($bridge, $object_id);
+    _removeEntityByObjectId($bridge, $object_id);
+    return (1);
+}
+
+sub _ownsObjectId {
+    my ($bridge, $object_id) = @_;
+    for my $did (keys %{ $bridge->{devices} }) {
+        my $entities = $bridge->{devices}{$did}{entities};
+        return 1 if grep { $entities->{$_}{object_id} eq $object_id } keys %$entities;
+    }
+    return 0;
 }
 
 # _registerEntity(\%entity) — shared by ha2fhem-native and generic discovery:
@@ -347,18 +374,24 @@ sub _handleState {
 
 # generic (topic-index) dispatch: one MQTT topic can carry several entities
 # (z2m publishes one shared JSON per device), so replay the message once per
-# registration.
+# registration. Returns ($claimed, @names): only device *state* topics are
+# claimed exclusively; availability topics are typically shared installation-
+# wide (zigbee2mqtt/bridge/state) and other modules must keep seeing them —
+# their readings still get updated here, dispatch just stays open.
 sub _handleGenericTopic {
     my ($bridge, $topic, $value) = @_;
 
-    my @found;
+    my ($claimed, @found);
     for my $reg (@{ $bridge->{topics}{$topic} // [] }) {
         my ($did, $key, $kind) = @$reg;
-        push @found, $kind eq 'availability'
-            ? _handleGenericAvailability($bridge, $did, $key, $value)
-            : _handleGenericState($bridge, $did, $key, $value);
+        if ($kind eq 'availability') {
+            _handleGenericAvailability($bridge, $did, $key, $value);
+        } else {
+            $claimed = 1;
+            push @found, _handleGenericState($bridge, $did, $key, $value);
+        }
     }
-    return @found;
+    return $claimed ? (1, @found) : (0);
 }
 
 sub _handleGenericState {
