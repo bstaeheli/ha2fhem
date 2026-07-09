@@ -210,8 +210,13 @@ sub _handleGenericDiscovery {
         return ();
     }
 
-    _registerGenericTopics($bridge, $entity);
-    return _registerEntity($bridge, $entity);
+    my @found = _registerEntity($bridge, $entity);
+    # index topics only for entities that survived the device filter —
+    # otherwise every foreign z2m/Tasmota device would leak into the index
+    _registerGenericTopics($bridge, $entity)
+        if $bridge->{devices}{ $entity->{device_id} }
+        && $bridge->{devices}{ $entity->{device_id} }{entities}{ $entity->{entity_key} };
+    return @found;
 }
 
 sub _handleGenericDiscoveryDelete {
