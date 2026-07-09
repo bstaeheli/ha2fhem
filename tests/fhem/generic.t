@@ -217,6 +217,12 @@ my $GP = 'homeassistant';
         'offline', 'availability: payload_not_available -> offline');
     is(FHEM::HA2FHEM::Discovery::Generic::availability_value($light->{config}, 'weird'),
         'weird', 'availability: unrecognized payload passes through unchanged');
+    is(FHEM::HA2FHEM::Discovery::Generic::availability_value(
+            $light->{config}, '{"state":"online"}'),
+        'online', 'availability: z2m JSON {"state":"online"} unwrapped');
+    is(FHEM::HA2FHEM::Discovery::Generic::availability_value(
+            $light->{config}, '{"state":"offline"}'),
+        'offline', 'availability: z2m JSON {"state":"offline"} unwrapped');
 
     # non-tier-1 template: skipped, no crash, warning names entity + template
     my $filtered = {

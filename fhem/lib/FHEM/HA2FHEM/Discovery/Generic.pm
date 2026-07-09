@@ -202,6 +202,14 @@ sub _flatten_availability {
 sub availability_value {
     my ($config, $raw) = @_;
     $config //= {};
+
+    # modern z2m publishes bridge availability as JSON {"state":"online"} —
+    # unwrap before comparing (caught live on a real broker 2026-07-09)
+    if (defined $raw && $raw =~ /^\s*\{/) {
+        my $data = eval { JSON::PP::decode_json($raw) };
+        $raw = $data->{state} if ref $data eq 'HASH' && defined $data->{state};
+    }
+
     my $avail_on  = $config->{payload_available}     // 'online';
     my $avail_off = $config->{payload_not_available}  // 'offline';
     return 'online'  if defined $raw && $raw eq $avail_on;
