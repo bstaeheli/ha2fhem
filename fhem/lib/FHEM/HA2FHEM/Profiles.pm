@@ -46,21 +46,25 @@ our %COMMANDS = (
         clean_spot     => { feature => 'clean_spot',  payload => 'clean_spot' },
     },
     cover => {
-        open  => { feature => 'open',  payload => 'OPEN' },
-        close => { feature => 'close', payload => 'CLOSE' },
-        stop  => { feature => 'stop',  payload => 'STOP' },
+        open  => { feature => 'open',  payload => 'OPEN',  payload_key => 'payload_open' },
+        close => { feature => 'close', payload => 'CLOSE', payload_key => 'payload_close' },
+        stop  => { feature => 'stop',  payload => 'STOP',  payload_key => 'payload_stop' },
     },
     # switch/light never publish supported_features (CONTRACT.md), so $gate
     # is always false for these and both setters always show.
     switch => {
-        on  => { feature => 'on',  payload => 'ON' },
-        off => { feature => 'off', payload => 'OFF' },
+        on  => { feature => 'on',  payload => 'ON',  payload_key => 'payload_on' },
+        off => { feature => 'off', payload => 'OFF', payload_key => 'payload_off' },
     },
     light => {
-        on  => { feature => 'on',  payload => 'ON' },
-        off => { feature => 'off', payload => 'OFF' },
+        on  => { feature => 'on',  payload => 'ON',  payload_key => 'payload_on' },
+        off => { feature => 'off', payload => 'OFF', payload_key => 'payload_off' },
     },
 );
+# payload_key: optional, generic-discovery-only (#17). When a discovery
+# config carries that key (payload_on/off/open/close/stop), it overrides the
+# fixed payload above. Our own discovery configs never set these keys, so
+# behavior for ha2fhem-native entities is unchanged.
 
 sub known_profile { return exists $PROFILES{ $_[0] } }
 
@@ -92,9 +96,11 @@ sub set_commands {
     for my $name (keys %$table) {
         my $cmd = $table->{$name};
         next if $gate && !$has{ $cmd->{feature} };
+        my $payload = $cmd->{payload};
+        $payload = $config->{ $cmd->{payload_key} } // $payload if $cmd->{payload_key};
         $set{$name} = {
             topic   => $config->{command_topic} // "$base/set",
-            payload => $cmd->{payload},
+            payload => $payload,
         };
     }
 

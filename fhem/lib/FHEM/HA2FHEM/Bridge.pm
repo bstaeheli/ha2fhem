@@ -10,6 +10,7 @@ use strict;
 use warnings;
 
 use FHEM::HA2FHEM::Discovery;
+use FHEM::HA2FHEM::Discovery::Generic;
 use FHEM::HA2FHEM::Filter;
 use FHEM::HA2FHEM::Profiles;
 
@@ -19,8 +20,8 @@ sub Initialize {
     $hash->{DefFn}    = 'FHEM::HA2FHEM::Bridge::Define';
     $hash->{UndefFn}  = 'FHEM::HA2FHEM::Bridge::Undef';
     $hash->{ParseFn}  = 'FHEM::HA2FHEM::Bridge::Parse';
-    $hash->{AttrList} = 'topicPrefix includeDevices excludeDevices '
-                      . 'includeClasses disable:0,1 '
+    $hash->{AttrList} = 'topicPrefix genericDiscoveryPrefix includeDevices '
+                      . 'excludeDevices includeClasses disable:0,1 '
                       . $main::readingFnAttributes;
     return;
 }
@@ -31,6 +32,8 @@ sub Define {
 
     $main::modules{HA2FHEM_BRIDGE}{defptr}{$name} = $hash;
     $hash->{devices} = {};    # device_id => { entities => { key => entity } }
+    $hash->{topics}  = {};    # topic => [ [device_id, entity_key, kind], ... ]
+                               # (generic discovery only; kind: state|availability)
 
     ::readingsSingleUpdate($hash, 'state', 'defined', 0);
     _setupIO($hash, 0);
@@ -118,23 +121,36 @@ sub Parse {
         next if !$bridge->{IODev} || $bridge->{IODev} != $iohash;
         next if ::IsDisabled($bname);
 
-        my $prefix = ::AttrVal($bname, 'topicPrefix', 'ha2fhem');
-        next if $topic !~ m{^\Q$prefix\E/};
-        $consumed = 1;
+        my $prefix  = ::AttrVal($bname, 'topicPrefix', 'ha2fhem');
+        my $gprefix = ::AttrVal($bname, 'genericDiscoveryPrefix', '');
 
-        if ($topic =~ m{^\Q$prefix\E/discovery/}) {
-            push @found, _handleDiscovery($bridge, $prefix, $topic, $value);
+        if ($topic =~ m{^\Q$prefix\E/}) {
+            $consumed = 1;
+
+            if ($topic =~ m{^\Q$prefix\E/discovery/}) {
+                push @found, _handleDiscovery($bridge, $prefix, $topic, $value);
+            }
+            elsif ($topic =~ m{^\Q$prefix\E/devices/([^/]+)/availability$}) {
+                push @found, _updateChild($bridge, $1, undef, 'availability', $value);
+            }
+            elsif ($topic =~ m{^\Q$prefix\E/devices/([^/]+)/([^/]+)/state$}) {
+                push @found, _handleState($bridge, $1, $2, $value);
+            }
+            elsif ($topic =~ m{^\Q$prefix\E/status$}) {
+                ::readingsSingleUpdate($bridge, 'peer', $value, 1);
+            }
+            # own command topics (.../set etc.) are ignored here on purpose
         }
-        elsif ($topic =~ m{^\Q$prefix\E/devices/([^/]+)/availability$}) {
-            push @found, _updateChild($bridge, $1, undef, 'availability', $value);
+        # genericDiscoveryPrefix is empty (feature off) by default: the
+        # bridge must never take over z2m/Tasmota devices silently.
+        elsif ($gprefix ne '' && $topic =~ m{^\Q$gprefix\E/[^/]+/(?:[^/]+/)?[^/]+/config$}) {
+            $consumed = 1;
+            push @found, _handleGenericDiscovery($bridge, $gprefix, $topic, $value);
         }
-        elsif ($topic =~ m{^\Q$prefix\E/devices/([^/]+)/([^/]+)/state$}) {
-            push @found, _handleState($bridge, $1, $2, $value);
+        elsif ($gprefix ne '' && $bridge->{topics}{$topic}) {
+            $consumed = 1;
+            push @found, _handleGenericTopic($bridge, $topic, $value);
         }
-        elsif ($topic =~ m{^\Q$prefix\E/status$}) {
-            ::readingsSingleUpdate($bridge, 'peer', $value, 1);
-        }
-        # own command topics (.../set etc.) are ignored here on purpose
     }
 
     return () if !$consumed;
@@ -155,6 +171,63 @@ sub _handleDiscovery {
         ::Log3($bname, 2, "$bname: $err");
         return ();
     }
+    return _registerEntity($bridge, $entity);
+}
+
+sub _handleDiscoveryDelete {
+    my ($bridge, $prefix, $topic) = @_;
+
+    my (undef, $object_id) =
+        FHEM::HA2FHEM::Discovery::parse_delete_topic($prefix, $topic);
+    return () if !$object_id;
+    return _removeEntityByObjectId($bridge, $object_id);
+}
+
+# genericDiscoveryPrefix topics: <gprefix>/<component>/[<node_id>/]<object_id>/config
+sub _handleGenericDiscovery {
+    my ($bridge, $gprefix, $topic, $value) = @_;
+    my $bname = $bridge->{NAME};
+
+    if (!defined $value || $value eq '') {
+        return _handleGenericDiscoveryDelete($bridge, $gprefix, $topic);
+    }
+
+    my ($entity, $err) =
+        FHEM::HA2FHEM::Discovery::Generic::parse_config($gprefix, $topic, $value);
+    if (!$entity) {
+        ::Log3($bname, 2, "$bname: $err");
+        return ();
+    }
+
+    # ponytail: stage 1 (#17) covers switch/light/cover as main entities,
+    # plus sensor/binary_sensor attaching to them like our own discovery.
+    # vacuum and everything else are stage 2 (#20).
+    my $component = $entity->{component};
+    if ($component ne 'sensor' && $component ne 'binary_sensor'
+        && !($component eq 'switch' || $component eq 'light' || $component eq 'cover')) {
+        ::Log3($bname, 4, "$bname: generic component $component not yet "
+             . "supported (stage 1: switch/light/cover), ignored");
+        return ();
+    }
+
+    _registerGenericTopics($bridge, $entity);
+    return _registerEntity($bridge, $entity);
+}
+
+sub _handleGenericDiscoveryDelete {
+    my ($bridge, $gprefix, $topic) = @_;
+
+    my (undef, $object_id) =
+        FHEM::HA2FHEM::Discovery::Generic::parse_delete_topic($gprefix, $topic);
+    return () if !$object_id;
+    return _removeEntityByObjectId($bridge, $object_id);
+}
+
+# _registerEntity(\%entity) — shared by ha2fhem-native and generic discovery:
+# apply include/excludeDevices, store the entity, autocreate the child.
+sub _registerEntity {
+    my ($bridge, $entity) = @_;
+    my $bname = $bridge->{NAME};
 
     my $did = $entity->{device_id};
     if (!FHEM::HA2FHEM::Filter::device_allowed(
@@ -179,19 +252,18 @@ sub _handleDiscovery {
     return $chash ? ($chash->{NAME}) : ();
 }
 
-sub _handleDiscoveryDelete {
-    my ($bridge, $prefix, $topic) = @_;
+# _removeEntityByObjectId($object_id) — shared by ha2fhem-native and generic
+# discovery delete (empty payload on a discovery config topic).
+sub _removeEntityByObjectId {
+    my ($bridge, $object_id) = @_;
     my $bname = $bridge->{NAME};
-
-    my (undef, $object_id) =
-        FHEM::HA2FHEM::Discovery::parse_delete_topic($prefix, $topic);
-    return () if !$object_id;
 
     for my $did (keys %{ $bridge->{devices} }) {
         my $entities = $bridge->{devices}{$did}{entities};
         for my $key (keys %$entities) {
             next if $entities->{$key}{object_id} ne $object_id;
             delete $entities->{$key};
+            _unregisterGenericTopics($bridge, $did, $key);
             ::Log3($bname, 4, "$bname: removed entity $object_id of $did");
             if (!%$entities) {
                 delete $bridge->{devices}{$did};
@@ -206,6 +278,33 @@ sub _handleDiscoveryDelete {
         }
     }
     return ();
+}
+
+sub _registerGenericTopics {
+    my ($bridge, $entity) = @_;
+    my $did = $entity->{device_id};
+    my $key = $entity->{entity_key};
+
+    # re-announcements (birth republish, z2m restart) must not stack up
+    # duplicate index entries
+    _unregisterGenericTopics($bridge, $did, $key);
+
+    push @{ $bridge->{topics}{ $entity->{state_topic} } }, [$did, $key, 'state'];
+
+    my $atopic = $entity->{config}{availability_topic};
+    push @{ $bridge->{topics}{$atopic} }, [$did, $key, 'availability']
+        if defined $atopic && $atopic ne '';
+    return;
+}
+
+sub _unregisterGenericTopics {
+    my ($bridge, $did, $key) = @_;
+    for my $topic (keys %{ $bridge->{topics} }) {
+        my $list = $bridge->{topics}{$topic};
+        @$list = grep { !($_->[0] eq $did && $_->[1] eq $key) } @$list;
+        delete $bridge->{topics}{$topic} if !@$list;
+    }
+    return;
 }
 
 sub _createChild {
@@ -239,6 +338,44 @@ sub _handleState {
     my $readings = FHEM::HA2FHEM::Profiles::state_readings(
         $component, $entity_key, $is_main, $value);
     return _updateChild($bridge, $did, $readings);
+}
+
+# generic (topic-index) dispatch: one MQTT topic can carry several entities
+# (z2m publishes one shared JSON per device), so replay the message once per
+# registration.
+sub _handleGenericTopic {
+    my ($bridge, $topic, $value) = @_;
+
+    my @found;
+    for my $reg (@{ $bridge->{topics}{$topic} // [] }) {
+        my ($did, $key, $kind) = @$reg;
+        push @found, $kind eq 'availability'
+            ? _handleGenericAvailability($bridge, $did, $key, $value)
+            : _handleGenericState($bridge, $did, $key, $value);
+    }
+    return @found;
+}
+
+sub _handleGenericState {
+    my ($bridge, $did, $key, $value) = @_;
+    my $bname  = $bridge->{NAME};
+    my $entity = $bridge->{devices}{$did}{entities}{$key};
+    return () if !$entity;
+
+    my $is_main = FHEM::HA2FHEM::Profiles::is_main_component($entity->{component});
+    my ($readings, $warning) =
+        FHEM::HA2FHEM::Discovery::Generic::state_reading($entity, $is_main, $value);
+    ::Log3($bname, 3, "$bname: $warning") if $warning;
+    return _updateChild($bridge, $did, $readings);
+}
+
+sub _handleGenericAvailability {
+    my ($bridge, $did, $key, $value) = @_;
+    my $entity = $bridge->{devices}{$did}{entities}{$key};
+    my $mapped = $entity
+        ? FHEM::HA2FHEM::Discovery::Generic::availability_value($entity->{config}, $value)
+        : $value;
+    return _updateChild($bridge, $did, undef, 'availability', $mapped);
 }
 
 # _updateChild($bridge, $device_id, \%readings [, $single_name, $single_val])
