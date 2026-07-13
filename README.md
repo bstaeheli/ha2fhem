@@ -10,7 +10,18 @@ Two components, usable together or alone, glued by a shared MQTT contract:
 - **HA custom integration `ha2fhem`** (HACS): re-exports Home Assistant's own devices as MQTT discovery, mirrors their state, and turns incoming commands into HA service calls. Templates are pre-rendered on the HA side, so FHEM never needs Jinja2.
 - **`CONTRACT.md`**: the single source of truth for topics and payload schemas. Both sides test against it.
 
-First supported device class: `vacuum` (iRobot Roomba via the HA `roomba` integration), full round trip — `set <vac> start` in FHEM makes the robot clean.
+Supported device classes: `vacuum`, `cover`, `switch`, `light` (plus their
+`sensor`/`binary_sensor` siblings as readings) — full round trip, e.g.
+`set <vac> start` in FHEM makes the robot clean.
+
+## Quick start
+
+Both sides, from scratch:
+
+1. **FHEM:** `update all https://codeberg.org/bstaeheli/ha2fhem/raw/branch/main/fhem/controls_ha2fhem.txt`, restart, define an `MQTT2_CLIENT` if you don't have one, `define ha2fhem HA2FHEM_BRIDGE`, then set the mandatory echo-guard `ignoreRegexp` on the `MQTT2_CLIENT`. Full walkthrough: [fhem/README.md](fhem/README.md).
+2. **Home Assistant:** install via HACS as a custom repository, then **Settings → Devices & Services → Add Integration → ha2fhem**. Full walkthrough: [custom_components/ha2fhem/README.md](custom_components/ha2fhem/README.md).
+
+Both sides default to topic prefix `ha2fhem` — as long as neither side changes it, devices should start appearing in FHEM as soon as both are configured.
 
 ## Status
 
