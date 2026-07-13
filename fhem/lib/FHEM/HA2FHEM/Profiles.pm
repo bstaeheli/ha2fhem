@@ -37,13 +37,20 @@ our %PROFILES = (
 # and are handled separately below.
 our %COMMANDS = (
     vacuum => {
-        start          => { feature => 'start',       payload => 'start' },
-        stop           => { feature => 'stop',        payload => 'stop' },
-        pause          => { feature => 'pause',       payload => 'pause' },
-        return_to_base => { feature => 'return_home', payload => 'return_to_base' },
-        dock           => { feature => 'return_home', payload => 'return_to_base' },
-        locate         => { feature => 'locate',      payload => 'locate' },
-        clean_spot     => { feature => 'clean_spot',  payload => 'clean_spot' },
+        start          => { feature => 'start',       payload => 'start',
+                             payload_key => 'payload_start' },
+        stop           => { feature => 'stop',        payload => 'stop',
+                             payload_key => 'payload_stop' },
+        pause          => { feature => 'pause',       payload => 'pause',
+                             payload_key => 'payload_pause' },
+        return_to_base => { feature => 'return_home', payload => 'return_to_base',
+                             payload_key => 'payload_return_to_base' },
+        dock           => { feature => 'return_home', payload => 'return_to_base',
+                             payload_key => 'payload_return_to_base' },
+        locate         => { feature => 'locate',      payload => 'locate',
+                             payload_key => 'payload_locate' },
+        clean_spot     => { feature => 'clean_spot',  payload => 'clean_spot',
+                             payload_key => 'payload_clean_spot' },
     },
     cover => {
         open  => { feature => 'open',  payload => 'OPEN',  payload_key => 'payload_open' },
@@ -61,10 +68,11 @@ our %COMMANDS = (
         off => { feature => 'off', payload => 'OFF', payload_key => 'payload_off' },
     },
 );
-# payload_key: optional, generic-discovery-only (#17). When a discovery
-# config carries that key (payload_on/off/open/close/stop), it overrides the
-# fixed payload above. Our own discovery configs never set these keys, so
-# behavior for ha2fhem-native entities is unchanged.
+# payload_key: optional, generic-discovery-only (#17/#24). When a discovery
+# config carries that key (payload_on/off/open/close/stop/start/pause/
+# return_to_base/locate/clean_spot), it overrides the fixed payload above.
+# Our own discovery configs never set these keys, so behavior for
+# ha2fhem-native entities is unchanged.
 
 sub known_profile { return exists $PROFILES{ $_[0] } }
 

@@ -214,14 +214,15 @@ sub _handleGenericDiscovery {
         return (0);
     }
 
-    # ponytail: stage 1 (#17) covers switch/light/cover as main entities,
-    # plus sensor/binary_sensor attaching to them like our own discovery.
-    # vacuum and everything else are stage 2 (#24).
+    # ponytail: stage 1 (#17) covers switch/light/cover; stage 2 (#24) adds
+    # vacuum. Everything else (fan, climate, ...) stays gated for a later
+    # stage.
     my $component = $entity->{component};
     if ($component ne 'sensor' && $component ne 'binary_sensor'
-        && !($component eq 'switch' || $component eq 'light' || $component eq 'cover')) {
+        && !($component eq 'switch' || $component eq 'light' || $component eq 'cover'
+             || $component eq 'vacuum')) {
         ::Log3($bname, 4, "$bname: generic component $component not yet "
-             . "supported (stage 1: switch/light/cover), ignored");
+             . "supported (stage 1/2: switch/light/cover/vacuum), ignored");
         return (0);
     }
 

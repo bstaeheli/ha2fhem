@@ -40,6 +40,7 @@ our %ABBREV = (
     ent_cat           => 'entity_category',
     ent_pic           => 'entity_picture',
     exp_aft           => 'expire_after',
+    fanspd_lst        => 'fan_speed_list',
     fx_cmd_t          => 'effect_command_topic',
     fx_list           => 'effect_list',
     fx_stat_t         => 'effect_state_topic',
@@ -55,17 +56,24 @@ our %ABBREV = (
     opt               => 'optimistic',
     pl                => 'payload',
     pl_avail          => 'payload_available',
+    pl_cln_sp         => 'payload_clean_spot',
     pl_cls            => 'payload_close',
+    pl_loc            => 'payload_locate',
     pl_not_avail      => 'payload_not_available',
     pl_off            => 'payload_off',
     pl_on             => 'payload_on',
     pl_open           => 'payload_open',
+    pl_paus           => 'payload_pause',
+    pl_ret2base       => 'payload_return_to_base',
     pl_stop           => 'payload_stop',
+    pl_strt           => 'payload_start',
     pos_clsd          => 'position_closed',
     pos_open          => 'position_open',
     pos_t             => 'position_topic',
     pos_tpl           => 'position_template',
     ret               => 'retain',
+    send_cmd_t        => 'send_command_topic',
+    set_fan_spd_t     => 'set_fan_speed_topic',
     set_pos_t         => 'set_position_topic',
     set_pos_tpl       => 'set_position_template',
     stat_cla          => 'state_class',
@@ -291,13 +299,34 @@ sub _device_id {
 # entity_key := slug of unique_id, with a leading "<device_name>_" prefix
 # stripped (Tasmota/ESPHome-style unique_ids are device-name-prefixed;
 # z2m's are MAC-based and never match, so nothing is stripped there).
+# Before slugging, a leading IEEE address and/or trailing "_zigbee2mqtt"
+# platform suffix is stripped off the raw unique_id (#24) — z2m bakes both
+# into unique_id, and neither carries any naming information.
+# ponytail: no collision handling — two entities on the same device that
+# normalize to the same key just clobber each other in the entities hash;
+# acceptable for now, revisit if it bites in practice.
 sub _entity_key {
     my ($unique_id, $device_name) = @_;
-    my $key     = _slug($unique_id);
-    my $dprefix = _slug($device_name);
+    my $stripped = _strip_ieee_z2m($unique_id);
+    my $key      = _slug($stripped ne '' ? $stripped : $unique_id);
+    my $dprefix  = _slug($device_name);
     return $key if $dprefix eq '';
     return $1 if $key =~ /^\Q$dprefix\E_(.+)$/;
     return $key;
+}
+
+# _strip_ieee_z2m($unique_id) -> raw (pre-slug) string with a leading
+# "0x<16 hex>_" IEEE address and/or a trailing "_zigbee2mqtt" suffix
+# removed, e.g. "0x00178801067e0e04_last_seen_zigbee2mqtt" -> "last_seen".
+# Returns '' if nothing but the address/suffix was present; the caller
+# falls back to the unstripped unique_id in that case.
+sub _strip_ieee_z2m {
+    my ($unique_id) = @_;
+    return '' if !defined $unique_id;
+    my $s = "$unique_id";
+    $s =~ s/^0x[0-9a-f]{16}_//;
+    $s =~ s/_zigbee2mqtt$//;
+    return $s;
 }
 
 sub _slug {
@@ -325,6 +354,61 @@ sub tier1_pluck {
     return \@parts;
 }
 
+# tier2_pluck($value_template) -> (\@path, $filter, $arg) | ()
+# Recognizes "{{ value_json[.path] | FILTER }}" / "{{ value_json[.path] |
+# FILTER(arg) }}" for exactly one of the supported simple filters: round(n),
+# int, float, default(x) (#24). Chained filters ("| round(1) | float") don't
+# match this pattern at all (no trailing "}}" right after the first filter),
+# an unknown filter name, or a filter called with the wrong arity (round
+# without its precision, int/float given an argument, default without one)
+# all return () — the caller falls through to the existing tier-2/3 degrade
+# path (#20).
+sub tier2_pluck {
+    my ($template) = @_;
+    return () if !defined $template || $template eq '';
+    return ()
+        if $template !~ /^\{\{\s*value_json((?:\.[A-Za-z_][A-Za-z0-9_]*)*)
+                          \s*\|\s*([a-z]+)\s*(?:\(\s*(.*?)\s*\))?\s*\}\}$/x;
+    my ($rawpath, $filter, $arg) = ($1, $2, $3);
+
+    my @parts = split /\./, $rawpath;
+    shift @parts if @parts && $parts[0] eq '';
+
+    if ($filter eq 'round') {
+        # negative precision would feed sprintf a malformed '%.-1f' — degrade
+        return () if !defined $arg || $arg !~ /^\d+$/;
+        return (\@parts, $filter, $arg + 0);
+    }
+    if ($filter eq 'int' || $filter eq 'float') {
+        return () if defined $arg && $arg ne '';
+        return (\@parts, $filter, undef);
+    }
+    if ($filter eq 'default') {
+        return () if !defined $arg || $arg eq '';
+        my $v = $arg;
+        $v = $1 if $v =~ /^'(.*)'$/ || $v =~ /^"(.*)"$/;
+        return (\@parts, $filter, $v);
+    }
+    return ();
+}
+
+# _apply_filter($filter, $arg, $value) -> filtered value | undef
+# $value is the raw plucked value (may be undef if the JSON path was
+# missing). default(x) is the only filter that looks at undef itself
+# (per #24: "used when the plucked key is missing/undef; otherwise the
+# plucked value passes through") — everything else propagates undef
+# unchanged, same as tier-1 (state_reading drops the reading silently).
+sub _apply_filter {
+    my ($filter, $arg, $v) = @_;
+    return (defined $v ? $v : $arg) if $filter eq 'default';
+    return undef if !defined $v;
+    no warnings 'numeric';
+    return sprintf('%.' . $arg . 'f', $v) if $filter eq 'round';
+    return int($v)                        if $filter eq 'int';
+    return $v + 0                         if $filter eq 'float';
+    return $v;
+}
+
 sub extract_json_path {
     my ($data, $path) = @_;
     my $v = $data;
@@ -339,8 +423,10 @@ sub extract_json_path {
 # Without a value_template: existing state_readings behavior (reused, not
 # duplicated). With a tier-1 value_template: single reading named
 # entity_key ('state' for the main entity), plucked from the JSON payload.
-# A non-tier-1 template returns no readings plus a warning naming the
-# entity + template (log it at level 3, do not crash) — tier 2/3 is #20.
+# A tier-2 value_template (#24: one simple round(n)/int/float/default(x)
+# filter after the pluck) gets the same treatment with the filter applied.
+# Anything else returns no readings plus a warning naming the entity +
+# template (log it at level 3, do not crash) — tier 3 is #20.
 sub state_reading {
     my ($entity, $is_main, $payload) = @_;
 
@@ -351,15 +437,18 @@ sub state_reading {
     }
 
     my $path = tier1_pluck($tpl);
+    my ($filter, $arg);
+    ($path, $filter, $arg) = tier2_pluck($tpl) if !$path;
     if (!$path) {
         return ({}, "generic entity $entity->{entity_key}: value_template "
-                   . "'$tpl' is not a supported tier-1 pluck, field skipped");
+                   . "'$tpl' is not a supported tier-1/tier-2 pluck, field skipped");
     }
 
     my $data = eval { JSON::PP::decode_json($payload) };
     return ({}, undef) if !$data || ref $data ne 'HASH';
 
     my $v = @$path ? extract_json_path($data, $path) : $data;
+    $v = _apply_filter($filter, $arg, $v) if $filter;
     return ({}, undef) if !defined $v;
 
     my $name = $is_main ? 'state' : $entity->{entity_key};
