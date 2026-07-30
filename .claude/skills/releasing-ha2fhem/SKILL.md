@@ -68,6 +68,18 @@ it is the sanctioned path, not a workaround:
    HACS writes that file on shutdown, so before the restart it still
    shows the old version even though the update succeeded.
 
+## The two sides ship differently
+
+| Side | How it reaches the user |
+|---|---|
+| HA integration (`custom_components/`) | GitHub release → HACS. Needs the manifest bump, the tag and the release. |
+| FHEM module (`fhem/`) | Codeberg **raw, branch main** — `update all https://codeberg.org/bstaeheli/ha2fhem/raw/branch/main/fhem/controls_ha2fhem.txt` then `shutdown restart`. No tag, no release: pushing to main *is* the deployment. |
+
+So a FHEM-only change needs `sh tools/gen-controls.sh` committed and a push
+to main, nothing else — but `controls_ha2fhem.txt` carries each file's size
+and mtime, so a stale controls file means FHEM silently keeps the old
+module. Regenerate it whenever anything under `fhem/` changes.
+
 ## Gates — all must pass before tagging
 
 | Gate | Command |
