@@ -32,8 +32,18 @@ Configure** to edit the same fields):
 | Field | Meaning |
 |---|---|
 | MQTT topic prefix (`topic_prefix`) | Default `ha2fhem`. Must match `topicPrefix` on the FHEM bridge. |
+| Include device classes (`include_domains`) | Multi-select over `vacuum`, `cover`, `switch`, `light`. Empty = all. |
+| Exclude device classes (`exclude_domains`) | Same list; wins over include. |
+| Include integrations (`include_integrations`) | Multi-select over the integrations installed on this HA (e.g. `roomba`, `overkiz`). Empty = all. |
+| Exclude integrations (`exclude_integrations`) | Same list; wins over include. |
 | Include devices (`include_devices`) | Comma-separated device ids or names to publish. Empty = all. |
 | Exclude devices (`exclude_devices`) | Same syntax; wins over include. |
+
+The three dimensions (device class, integration, device) are evaluated
+against a device's main entity: any exclude match drops the device outright,
+then every *non-empty* include list has to match. So include device classes
+`cover` plus include integrations `overkiz` publishes exactly the Overkiz
+covers.
 
 Only a single instance is allowed per Home Assistant.
 
@@ -53,10 +63,10 @@ runtime.
 
 ## Troubleshooting
 
-- **Entities missing on the FHEM side:** check the include/exclude device
-  filters above — a device excluded (or not matched by a non-empty include
-  list) never gets discovery published at all, so nothing to check on the
-  FHEM side will help.
+- **Entities missing on the FHEM side:** check the include/exclude filters
+  above — a device excluded (or not matched by a non-empty include list on
+  any of the three dimensions) never gets discovery published at all, so
+  nothing to check on the FHEM side will help.
 - **Vacuum shows unavailable / asleep:** normal. `unavailable` just mirrors
   the underlying HA entity's own availability (e.g. a Roomba that went to
   sleep) — it is not a bridge problem.

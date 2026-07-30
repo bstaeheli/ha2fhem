@@ -19,7 +19,8 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
 from .contract import COMMAND_KINDS, command_to_service, parse_command_topic
-from .publisher import MAIN_DOMAINS, _device_allowed
+from .filters import DeviceFilter
+from .publisher import MAIN_DOMAINS
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -27,13 +28,10 @@ _LOGGER = logging.getLogger(__name__)
 class CommandHandler:
     """Subscribes to command topics and dispatches main-entity service calls."""
 
-    def __init__(
-        self, hass: HomeAssistant, prefix: str, include_devices: str, exclude_devices: str
-    ) -> None:
+    def __init__(self, hass: HomeAssistant, prefix: str, device_filter: DeviceFilter) -> None:
         self.hass = hass
         self.prefix = prefix
-        self.include_devices = include_devices
-        self.exclude_devices = exclude_devices
+        self.filter = device_filter
         self._unsubs: list[Callable[[], None]] = []
 
     async def async_start(self) -> None:
@@ -102,8 +100,8 @@ class CommandHandler:
             if device is None:
                 continue
             device_name = device.name_by_user or device.name or entry.device_id
-            if not _device_allowed(
-                entry.device_id, device_name, self.include_devices, self.exclude_devices
+            if not self.filter.allows(
+                entry.domain, entry.platform, entry.device_id, device_name
             ):
                 continue
 

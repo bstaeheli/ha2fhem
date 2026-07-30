@@ -34,6 +34,7 @@ from .contract import (
     vacuum_command_topics_extra,
     vacuum_state_payload,
 )
+from .filters import DeviceFilter
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -41,33 +42,13 @@ SENSOR_DOMAINS = ("sensor", "binary_sensor")
 MAIN_DOMAINS = ("vacuum", "cover", "switch", "light")
 
 
-def _matches_filter(value: str, filter_str: str) -> bool:
-    items = {v.strip() for v in filter_str.split(",") if v.strip()}
-    return value in items
-
-
-def _device_allowed(
-    device_id: str, device_name: str, include: str, exclude: str
-) -> bool:
-    if exclude and (_matches_filter(device_id, exclude) or _matches_filter(device_name, exclude)):
-        return False
-    if include and not (
-        _matches_filter(device_id, include) or _matches_filter(device_name, include)
-    ):
-        return False
-    return True
-
-
 class Publisher:
     """Publishes discovery + mirrors state for the devices this config entry covers."""
 
-    def __init__(
-        self, hass: HomeAssistant, prefix: str, include_devices: str, exclude_devices: str
-    ) -> None:
+    def __init__(self, hass: HomeAssistant, prefix: str, device_filter: DeviceFilter) -> None:
         self.hass = hass
         self.prefix = prefix
-        self.include_devices = include_devices
-        self.exclude_devices = exclude_devices
+        self.filter = device_filter
         self._unsubs: list[Callable[[], None]] = []
         # (component, device_id, entity_key) for every discovery config topic
         # published by the run in progress/just completed. Diffed against the
@@ -98,8 +79,8 @@ class Publisher:
             device_id = main_entry.device_id
             device_name = device.name_by_user or device.name or device_id
 
-            if not _device_allowed(
-                device_id, device_name, self.include_devices, self.exclude_devices
+            if not self.filter.allows(
+                main_entry.domain, main_entry.platform, device_id, device_name
             ):
                 continue
 

@@ -6,22 +6,68 @@ from typing import Any
 
 import voluptuous as vol
 from homeassistant import config_entries
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers import selector
 
 from .const import (
     CONF_EXCLUDE_DEVICES,
+    CONF_EXCLUDE_DOMAINS,
+    CONF_EXCLUDE_INTEGRATIONS,
     CONF_INCLUDE_DEVICES,
+    CONF_INCLUDE_DOMAINS,
+    CONF_INCLUDE_INTEGRATIONS,
     CONF_TOPIC_PREFIX,
     DEFAULT_TOPIC_PREFIX,
     DOMAIN,
 )
+from .publisher import MAIN_DOMAINS
 
-DATA_SCHEMA = vol.Schema(
-    {
-        vol.Required(CONF_TOPIC_PREFIX, default=DEFAULT_TOPIC_PREFIX): str,
-        vol.Optional(CONF_INCLUDE_DEVICES, default=""): str,
-        vol.Optional(CONF_EXCLUDE_DEVICES, default=""): str,
-    }
-)
+
+def _multi_select(options: list[str]) -> selector.SelectSelector:
+    return selector.SelectSelector(
+        selector.SelectSelectorConfig(
+            options=options,
+            multiple=True,
+            custom_value=True,
+            mode=selector.SelectSelectorMode.DROPDOWN,
+        )
+    )
+
+
+def _build_schema(hass: HomeAssistant, current: dict[str, Any]) -> vol.Schema:
+    """Shared form for config and options flow (they show the same fields)."""
+    domains = list(MAIN_DOMAINS)
+    integrations = sorted(
+        {e.domain for e in hass.config_entries.async_entries()} - {DOMAIN}
+    )
+    return vol.Schema(
+        {
+            vol.Required(
+                CONF_TOPIC_PREFIX,
+                default=current.get(CONF_TOPIC_PREFIX, DEFAULT_TOPIC_PREFIX),
+            ): str,
+            vol.Optional(
+                CONF_INCLUDE_DOMAINS, default=current.get(CONF_INCLUDE_DOMAINS, [])
+            ): _multi_select(domains),
+            vol.Optional(
+                CONF_EXCLUDE_DOMAINS, default=current.get(CONF_EXCLUDE_DOMAINS, [])
+            ): _multi_select(domains),
+            vol.Optional(
+                CONF_INCLUDE_INTEGRATIONS,
+                default=current.get(CONF_INCLUDE_INTEGRATIONS, []),
+            ): _multi_select(integrations),
+            vol.Optional(
+                CONF_EXCLUDE_INTEGRATIONS,
+                default=current.get(CONF_EXCLUDE_INTEGRATIONS, []),
+            ): _multi_select(integrations),
+            vol.Optional(
+                CONF_INCLUDE_DEVICES, default=current.get(CONF_INCLUDE_DEVICES, "")
+            ): str,
+            vol.Optional(
+                CONF_EXCLUDE_DEVICES, default=current.get(CONF_EXCLUDE_DEVICES, "")
+            ): str,
+        }
+    )
 
 
 class Ha2fhemConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -35,8 +81,6 @@ class Ha2fhemConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if self._async_current_entries():
             return self.async_abort(reason="single_instance_allowed")
 
-        errors: dict[str, str] = {}
-
         if user_input is not None:
             return self.async_create_entry(
                 title=user_input.get(CONF_TOPIC_PREFIX, DEFAULT_TOPIC_PREFIX),
@@ -44,7 +88,7 @@ class Ha2fhemConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
 
         return self.async_show_form(
-            step_id="user", data_schema=DATA_SCHEMA, errors=errors
+            step_id="user", data_schema=_build_schema(self.hass, {}), errors={}
         )
 
     @staticmethod
@@ -55,7 +99,7 @@ class Ha2fhemConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class Ha2fhemOptionsFlow(config_entries.OptionsFlow):
-    """Options flow letting topic_prefix/include_devices/exclude_devices be edited post-setup."""
+    """Options flow letting all filters/topic_prefix be edited post-setup."""
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -64,18 +108,6 @@ class Ha2fhemOptionsFlow(config_entries.OptionsFlow):
             return self.async_create_entry(data=user_input)
 
         current = {**self.config_entry.data, **self.config_entry.options}
-        schema = vol.Schema(
-            {
-                vol.Required(
-                    CONF_TOPIC_PREFIX,
-                    default=current.get(CONF_TOPIC_PREFIX, DEFAULT_TOPIC_PREFIX),
-                ): str,
-                vol.Optional(
-                    CONF_INCLUDE_DEVICES, default=current.get(CONF_INCLUDE_DEVICES, "")
-                ): str,
-                vol.Optional(
-                    CONF_EXCLUDE_DEVICES, default=current.get(CONF_EXCLUDE_DEVICES, "")
-                ): str,
-            }
+        return self.async_show_form(
+            step_id="init", data_schema=_build_schema(self.hass, current)
         )
-        return self.async_show_form(step_id="init", data_schema=schema)

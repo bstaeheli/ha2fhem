@@ -20,8 +20,18 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_call_later
 
 from .commands import CommandHandler
-from .const import CONF_EXCLUDE_DEVICES, CONF_INCLUDE_DEVICES, CONF_TOPIC_PREFIX, DOMAIN
+from .const import (
+    CONF_EXCLUDE_DEVICES,
+    CONF_EXCLUDE_DOMAINS,
+    CONF_EXCLUDE_INTEGRATIONS,
+    CONF_INCLUDE_DEVICES,
+    CONF_INCLUDE_DOMAINS,
+    CONF_INCLUDE_INTEGRATIONS,
+    CONF_TOPIC_PREFIX,
+    DOMAIN,
+)
 from .contract import status_topic
+from .filters import DeviceFilter
 from .publisher import MAIN_DOMAINS, SENSOR_DOMAINS, Publisher
 
 PLATFORMS: list[str] = []
@@ -46,16 +56,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up ha2fhem from a config entry."""
     await mqtt.async_wait_for_mqtt_client(hass)
 
-    prefix = entry.options.get(CONF_TOPIC_PREFIX, entry.data.get(CONF_TOPIC_PREFIX, "ha2fhem"))
-    include_devices = entry.options.get(
-        CONF_INCLUDE_DEVICES, entry.data.get(CONF_INCLUDE_DEVICES, "")
-    )
-    exclude_devices = entry.options.get(
-        CONF_EXCLUDE_DEVICES, entry.data.get(CONF_EXCLUDE_DEVICES, "")
+    def _conf(key: str, default):
+        return entry.options.get(key, entry.data.get(key, default))
+
+    prefix = _conf(CONF_TOPIC_PREFIX, "ha2fhem")
+    device_filter = DeviceFilter(
+        include_devices=_conf(CONF_INCLUDE_DEVICES, ""),
+        exclude_devices=_conf(CONF_EXCLUDE_DEVICES, ""),
+        include_domains=_conf(CONF_INCLUDE_DOMAINS, []),
+        exclude_domains=_conf(CONF_EXCLUDE_DOMAINS, []),
+        include_integrations=_conf(CONF_INCLUDE_INTEGRATIONS, []),
+        exclude_integrations=_conf(CONF_EXCLUDE_INTEGRATIONS, []),
     )
 
-    publisher = Publisher(hass, prefix, include_devices, exclude_devices)
-    command_handler = CommandHandler(hass, prefix, include_devices, exclude_devices)
+    publisher = Publisher(hass, prefix, device_filter)
+    command_handler = CommandHandler(hass, prefix, device_filter)
 
     unsubs: list[Callable[[], None]] = []
 
