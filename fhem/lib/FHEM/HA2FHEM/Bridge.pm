@@ -21,7 +21,7 @@ sub Initialize {
     $hash->{UndefFn}  = 'FHEM::HA2FHEM::Bridge::Undef';
     $hash->{ParseFn}  = 'FHEM::HA2FHEM::Bridge::Parse';
     $hash->{AttrList} = 'topicPrefix genericDiscoveryPrefix includeDevices '
-                      . 'excludeDevices includeClasses disable:0,1 '
+                      . 'excludeDevices includeClasses IODev disable:0,1 '
                       . $main::readingFnAttributes;
     return;
 }
