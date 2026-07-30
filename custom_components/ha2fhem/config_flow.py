@@ -34,6 +34,22 @@ def _multi_select(options: list[str]) -> selector.SelectSelector:
     )
 
 
+def _optional(key: str, current: dict[str, Any], empty: Any) -> vol.Optional:
+    """Prefill a field with its stored value without making that value sticky.
+
+    The frontend omits an optional field the user cleared, and voluptuous
+    then substitutes the marker's `default`. Defaulting to the stored value
+    therefore wrote it straight back, so an emptied filter reappeared on the
+    next open and could never be cleared -- only narrowed. The default has to
+    be the neutral empty value; the prefill goes through suggested_value.
+    """
+    return vol.Optional(
+        key,
+        description={"suggested_value": current.get(key, empty)},
+        default=empty,
+    )
+
+
 def _build_schema(hass: HomeAssistant, current: dict[str, Any]) -> vol.Schema:
     """Shared form for config and options flow (they show the same fields)."""
     domains = list(MAIN_DOMAINS)
@@ -44,28 +60,23 @@ def _build_schema(hass: HomeAssistant, current: dict[str, Any]) -> vol.Schema:
         {
             vol.Required(
                 CONF_TOPIC_PREFIX,
-                default=current.get(CONF_TOPIC_PREFIX, DEFAULT_TOPIC_PREFIX),
+                description={
+                    "suggested_value": current.get(
+                        CONF_TOPIC_PREFIX, DEFAULT_TOPIC_PREFIX
+                    )
+                },
+                default=DEFAULT_TOPIC_PREFIX,
             ): str,
-            vol.Optional(
-                CONF_INCLUDE_DOMAINS, default=current.get(CONF_INCLUDE_DOMAINS, [])
-            ): _multi_select(domains),
-            vol.Optional(
-                CONF_EXCLUDE_DOMAINS, default=current.get(CONF_EXCLUDE_DOMAINS, [])
-            ): _multi_select(domains),
-            vol.Optional(
-                CONF_INCLUDE_INTEGRATIONS,
-                default=current.get(CONF_INCLUDE_INTEGRATIONS, []),
-            ): _multi_select(integrations),
-            vol.Optional(
-                CONF_EXCLUDE_INTEGRATIONS,
-                default=current.get(CONF_EXCLUDE_INTEGRATIONS, []),
-            ): _multi_select(integrations),
-            vol.Optional(
-                CONF_INCLUDE_DEVICES, default=current.get(CONF_INCLUDE_DEVICES, "")
-            ): str,
-            vol.Optional(
-                CONF_EXCLUDE_DEVICES, default=current.get(CONF_EXCLUDE_DEVICES, "")
-            ): str,
+            _optional(CONF_INCLUDE_DOMAINS, current, []): _multi_select(domains),
+            _optional(CONF_EXCLUDE_DOMAINS, current, []): _multi_select(domains),
+            _optional(CONF_INCLUDE_INTEGRATIONS, current, []): _multi_select(
+                integrations
+            ),
+            _optional(CONF_EXCLUDE_INTEGRATIONS, current, []): _multi_select(
+                integrations
+            ),
+            _optional(CONF_INCLUDE_DEVICES, current, ""): str,
+            _optional(CONF_EXCLUDE_DEVICES, current, ""): str,
         }
     )
 
