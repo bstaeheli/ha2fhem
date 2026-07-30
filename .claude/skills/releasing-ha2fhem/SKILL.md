@@ -40,9 +40,12 @@ No exceptions:
 - Not because a manual copy is already there from an earlier release
 - Not even with the user's SSH key working and `sudo` available
 
-A manual copy shadows the HACS-managed one and silently diverges. If a
-manual copy exists, the fix is to remove it and install via HACS — and
-that removal is the user's call, not yours.
+HACS installs integrations into that very directory, so a hand-copy does
+not create a second install — it overwrites HACS's files behind its back
+and corrupts its bookkeeping: `installed_version` in
+`/config/.storage/hacs.data` goes `None`, and HACS can no longer tell
+what is actually on disk or offer a correct update. Repairing that is a
+redownload through the HACS UI, which only the user can trigger.
 
 Publishing the GitHub release **is** the deployment. HACS picks the new
 tag up from there; the user installs/updates it in the HACS UI and
