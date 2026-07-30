@@ -6,6 +6,10 @@
         "description": "Re-export Home Assistant devices as ha2fhem MQTT discovery for FHEM.",
         "data": {
           "topic_prefix": "MQTT topic prefix",
+          "include_domains": "Include device classes (empty = all)",
+          "exclude_domains": "Exclude device classes",
+          "include_integrations": "Include integrations (empty = all)",
+          "exclude_integrations": "Exclude integrations",
           "include_devices": "Include devices (comma-separated device ids or names, optional)",
           "exclude_devices": "Exclude devices (comma-separated device ids or names, optional)"
         }
@@ -22,6 +26,10 @@
         "description": "Re-export Home Assistant devices as ha2fhem MQTT discovery for FHEM.",
         "data": {
           "topic_prefix": "MQTT topic prefix",
+          "include_domains": "Include device classes (empty = all)",
+          "exclude_domains": "Exclude device classes",
+          "include_integrations": "Include integrations (empty = all)",
+          "exclude_integrations": "Exclude integrations",
           "include_devices": "Include devices (comma-separated device ids or names, optional)",
           "exclude_devices": "Exclude devices (comma-separated device ids or names, optional)"
         }
