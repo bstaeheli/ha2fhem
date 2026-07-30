@@ -266,7 +266,7 @@ class Publisher:
             try:
                 payload = cover_state_payload(
                     state=new_state.state,
-                    position=new_state.attributes.get("current_cover_position"),
+                    position=new_state.attributes.get("current_position"),
                 )
             except ValueError:
                 # unavailable/unknown is the cover being asleep, not a bug
