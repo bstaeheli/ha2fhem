@@ -47,9 +47,26 @@ and corrupts its bookkeeping: `installed_version` in
 what is actually on disk or offer a correct update. Repairing that is a
 redownload through the HACS UI, which only the user can trigger.
 
-Publishing the GitHub release **is** the deployment. HACS picks the new
-tag up from there; the user installs/updates it in the HACS UI and
-restarts HA themselves.
+Publishing the GitHub release **is** the deployment. What you may do on
+request is drive HACS itself — that goes through HACS's bookkeeping, so
+it is the sanctioned path, not a workaround:
+
+1. HACS only refreshes downloaded custom repositories **every 48 hours**
+   and not at startup, so a fresh tag stays invisible. Force it over HA's
+   websocket API (`ws://<host>:8123/api/websocket`, auth with `HA_TOKEN`,
+   admin required):
+   `{"id":1,"type":"hacs/repository/refresh","repository":"<repo id>"}`
+   — `repository` is HACS's numeric id (`1292217807` for ha2fhem, found
+   in `/config/.storage/hacs.data`). This runs `update_repository(force=True)`,
+   which bypasses the cached `etag_repository`. Reloading the HACS config
+   entry does **not** do this.
+2. `update.ha2fhem_update` then flips to `on` with the new
+   `latest_version`. Install with the ordinary HA service
+   `update/install` on that entity — HACS does the download itself.
+3. Restart HA (`homeassistant/restart`) so the new modules load, then
+   confirm `version_installed` in `hacs.data` matches the new tag.
+   HACS writes that file on shutdown, so before the restart it still
+   shows the old version even though the update succeeded.
 
 ## Gates — all must pass before tagging
 
