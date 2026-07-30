@@ -70,6 +70,24 @@ also matches inside discovery config JSON (which embeds the command topics as
 values), silently eating your discovery messages. If you forget this, the
 bridge logs a reminder with the exact line to add once it has an `IODev`.
 
+## Commands
+
+| Command | Meaning |
+|---------|---------|
+| `set <bridge> rescan` | Ask the HA side to republish all discovery and state, so devices missing on the FHEM side get announced again. |
+
+Nothing is published retained, so the bridge cannot re-read what it missed —
+asking the publisher to send everything again is the only way to repopulate
+short of restarting Home Assistant.
+
+`rescan` works by publishing `online` to `homeassistant/status`, Home
+Assistant's own birth topic. **Every other discovery publisher on the same
+broker re-announces too** (zigbee2mqtt and friends). That is what the topic
+means and it cannot be narrowed to ha2fhem alone; on a broker shared with
+`MQTT2_DEVICE`s, know this before you use it. Reloading the ha2fhem config
+entry on the HA side has the same effect on ha2fhem without touching anyone
+else.
+
 ## Attributes
 
 Set on the bridge device (`ha2fhem` above):
@@ -128,3 +146,13 @@ belong to. Full topic/payload details: [CONTRACT.md](../CONTRACT.md).
 - Check `topicPrefix` on the bridge matches `topic_prefix` configured on the
   HA integration side (both default to `ha2fhem`, but a mismatch here means
   the bridge never sees the discovery topics).
+- Once the above are in order, `set <bridge> rescan` makes the HA side
+  announce everything again. Discovery is only ever sent on HA start, on a
+  config entry reload, on a device/entity change, or on the birth message —
+  a bridge that came up late simply missed it.
+
+**A child is named after the device name, not the device id:** it was
+created by a bridge older than the `ha2fhem_<device_id>` naming. FHEM never
+renames existing devices, so update the module and then `delete` the child —
+the next `rescan` recreates it under the correct name, with the friendly
+name kept as `alias`.

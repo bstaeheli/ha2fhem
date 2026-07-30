@@ -37,6 +37,21 @@ sub HA2FHEM_BRIDGE_Initialize { goto &FHEM::HA2FHEM::Bridge::Initialize }
     is only one). The bridge registers itself in the IO's clientOrder.
   </ul><br>
 
+  <a id="HA2FHEM_BRIDGE-set"></a>
+  <b>Set</b>
+  <ul>
+    <li><a id="HA2FHEM_BRIDGE-set-rescan">rescan</a><br>
+      Ask the Home Assistant side to republish everything, so devices that
+      are missing on the FHEM side are announced again. Nothing is published
+      retained, so this is the only way to repopulate without restarting
+      Home Assistant.<br>
+      This works by publishing <code>online</code> to
+      <code>homeassistant/status</code>, Home Assistant's own birth topic.
+      Every other discovery publisher on the same broker (zigbee2mqtt and
+      friends) therefore re-announces as well &mdash; that is what the topic
+      means, and it cannot be narrowed to ha2fhem alone.</li>
+  </ul><br>
+
   <a id="HA2FHEM_BRIDGE-attr"></a>
   <b>Attributes</b>
   <ul>

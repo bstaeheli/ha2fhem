@@ -22,6 +22,7 @@ sub Initialize {
     $hash->{DefFn}    = 'FHEM::HA2FHEM::Bridge::Define';
     $hash->{UndefFn}  = 'FHEM::HA2FHEM::Bridge::Undef';
     $hash->{ParseFn}  = 'FHEM::HA2FHEM::Bridge::Parse';
+    $hash->{SetFn}    = 'FHEM::HA2FHEM::Bridge::Set';
     $hash->{AttrList} = 'topicPrefix genericDiscoveryPrefix includeDevices '
                       . 'excludeDevices includeClasses IODev disable:0,1 '
                       . $main::readingFnAttributes;
@@ -39,6 +40,27 @@ sub Define {
 
     ::readingsSingleUpdate($hash, 'state', 'defined', 0);
     _setupIO($hash, 0);
+    return;
+}
+
+# The HA birth topic. Publishing "online" here makes the ha2fhem integration
+# republish every discovery config and state (see CONTRACT.md "Hard rules").
+my $HA_STATUS_TOPIC = 'homeassistant/status';
+
+sub Set {
+    my ($hash, $name, $cmd, @args) = @_;
+    $cmd //= '';
+
+    return "Unknown argument $cmd, choose one of rescan:noArg" if $cmd ne 'rescan';
+    return if ::IsDisabled($name);
+
+    # Nothing is retained, so the bridge cannot re-read what it missed -- the
+    # only way to repopulate is to make the publisher send everything again.
+    # This is HA's own birth message, so every other discovery publisher on
+    # the broker (zigbee2mqtt and friends) re-announces too; that is the
+    # documented meaning of the topic, not a side effect we can narrow.
+    ::IOWrite($hash, 'publish', "$HA_STATUS_TOPIC online");
+    ::Log3($name, 3, "$name: rescan -- published online to $HA_STATUS_TOPIC");
     return;
 }
 
