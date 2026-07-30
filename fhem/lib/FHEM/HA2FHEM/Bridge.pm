@@ -14,6 +14,8 @@ use FHEM::HA2FHEM::Discovery::Generic;
 use FHEM::HA2FHEM::Filter;
 use FHEM::HA2FHEM::Profiles;
 
+my %DEFAULT_ICON = (vacuum => 'vacuum_top');
+
 sub Initialize {
     my ($hash) = @_;
     $hash->{Match}    = '^autocreate=';
@@ -356,6 +358,8 @@ sub _createChild {
     ::CommandAttr(undef, "$cname room HA2FHEM");
     ::CommandAttr(undef, "$cname alias $entity->{device_name}")
         if $entity->{device_name};
+    my $icon = $DEFAULT_ICON{ $entity->{component} };
+    ::CommandAttr(undef, "$cname icon $icon") if $icon;
     my $chash = $main::defs{$cname};
     $chash->{bridge} = $bname;
     $chash->{IODev}  = $bridge->{IODev};
