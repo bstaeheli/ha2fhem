@@ -86,11 +86,15 @@ Set on the bridge device (`ha2fhem` above):
 ## What you get
 
 One `HA2FHEM_CLIENT` device per Home Assistant device, auto-created in room
-`HA2FHEM` as discovery arrives — nothing to `define` by hand. All of the
-device's entities (main entity plus its sensors/binary_sensors) show up as
-readings on that one device. Setters appear automatically, gated by the HA
-side's `supported_features` (when unknown, e.g. right after startup, all
-setters for the class are shown rather than none):
+`HA2FHEM` as discovery arrives — nothing to `define` by hand. Named
+`ha2fhem_<device_id>` (the HA device registry id, stable and unique — the
+HA-side friendly name isn't guaranteed unique and can change) with the HA
+friendly name set as `alias`; rename it in FHEM to whatever you like, the
+bridge keeps tracking it by its FHEM definition (device_id), not by name.
+All of the device's entities (main entity plus its sensors/binary_sensors)
+show up as readings on that one device. Setters appear automatically, gated
+by the HA side's `supported_features` (when unknown, e.g. right after
+startup, all setters for the class are shown rather than none):
 
 | Device class | Setters |
 |---|---|
@@ -102,9 +106,10 @@ setters for the class are shown rather than none):
 Example:
 
 ```
-set ha2fhem_vacuum_livingroom start
-set ha2fhem_shutters_kitchen pct 50
+set ha2fhem_938f06e1532d38f49aaaf4cefee3b233 start
 ```
+(or rename it first — `rename ha2fhem_938f06e1532d38f49aaaf4cefee3b233 vacuum_livingroom`,
+then `set vacuum_livingroom start`)
 
 Supported device classes today: `vacuum`, `cover`, `switch`, `light`, plus
 `sensor`/`binary_sensor` as read-only readings on whichever device they

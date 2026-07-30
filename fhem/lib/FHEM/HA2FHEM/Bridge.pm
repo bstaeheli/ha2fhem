@@ -344,13 +344,18 @@ sub _createChild {
     my ($bridge, $did, $entity) = @_;
     my $bname = $bridge->{NAME};
 
-    my $cname = ::makeDeviceName('ha2fhem_' . $entity->{device_name});
+    # named after device_id, not device_name: the HA-side friendly name isn't
+    # guaranteed unique and can change, but the child must stay reachable by
+    # a stable key across discovery cycles regardless of any FHEM-side rename.
+    my $cname = ::makeDeviceName('ha2fhem_' . $did);
     my $err = ::CommandDefine(undef, "$cname HA2FHEM_CLIENT $did");
     if ($err) {
         ::Log3($bname, 1, "$bname: cannot create child $cname: $err");
         return;
     }
     ::CommandAttr(undef, "$cname room HA2FHEM");
+    ::CommandAttr(undef, "$cname alias $entity->{device_name}")
+        if $entity->{device_name};
     my $chash = $main::defs{$cname};
     $chash->{bridge} = $bname;
     $chash->{IODev}  = $bridge->{IODev};
